@@ -2879,9 +2879,9 @@ _wac34 = _WAC34(
 _wac34.register_routes()
 # 25 条原有（其中 /config、/page/switch 已随配置独立页移除；/config/full 与
 # /config/save 恢复，配置功能收进 dashboard 右上角配置视图）
-# + 7 条图床面板新增路由（/image_bed/test|switch|templates、
-# /config/image_bed 及 create/update/delete）；/page/switch 互切路由已移除
-assert len(_mock_ctx34.routes) == 31, f"注册路由数不符: {len(_mock_ctx34.routes)}"
+# + 8 条图床面板新增路由（/image_bed/test|switch|templates、
+# /config/image_bed 及 create/update/delete/move）；/page/switch 互切路由已移除
+assert len(_mock_ctx34.routes) == 32, f"注册路由数不符: {len(_mock_ctx34.routes)}"
 _route_paths = [r[0] for r in _mock_ctx34.routes]
 assert "/astrbot_plugin_minecraft_queqiao/servers" in _route_paths
 assert "/astrbot_plugin_minecraft_queqiao/stats" in _route_paths
@@ -3652,10 +3652,10 @@ _ctx35 = _MockCtx35()
 _wac35 = _WAC35(_ctx35, _sm35, None, None, None,
                 {"Srv": _cfg35_on, "Srv2": _SC35.from_dict({})}, None, _col35)
 _wac35.register_routes()
-# 31 条基础路由（/config、/page/switch 已随配置独立页移除；/config/full 与
+# 32 条基础路由（/config、/page/switch 已随配置独立页移除；/config/full 与
 # /config/save 恢复供 dashboard 配置视图使用）
 # + 5 条监控路由；无互切路由
-assert len(_ctx35.routes) == 36, f"监控注入后应注册 36 条路由, 实际 {len(_ctx35.routes)}"
+assert len(_ctx35.routes) == 37, f"监控注入后应注册 37 条路由, 实际 {len(_ctx35.routes)}"
 _rp35 = [r[0] for r in _ctx35.routes]
 assert "/astrbot_plugin_minecraft_queqiao/monitor/status" in _rp35
 assert "/astrbot_plugin_minecraft_queqiao/monitor/<server_name>/series" in _rp35
@@ -5029,6 +5029,7 @@ for _p29 in (
     "/astrbot_plugin_minecraft_queqiao/config/image_bed/create",
     "/astrbot_plugin_minecraft_queqiao/config/image_bed/update",
     "/astrbot_plugin_minecraft_queqiao/config/image_bed/delete",
+    "/astrbot_plugin_minecraft_queqiao/config/image_bed/move",
 ):
     assert _p29 in _rp29, f"缺少图床路由 {_p29}"
 
@@ -5148,6 +5149,67 @@ async def _fake_json29l(default=None):
     return {"nonsense": 1}
 _wa29.request.json = _fake_json29l
 assert asyncio.run(_wac29.switch_image_bed())["status_code"] == 400
+_wa29.request.json = _orig_json29
+
+# (g2) 顺序移动：上移/下移交换相邻条目并局部生效（上传按列表顺序尝试），
+# 边界（已在最前/最后）与非法 direction / index 一律 400，且不得触碰
+# mc_servers。此时列表为 (c)(d)(e) 之后的三条：本机 / catbox / 猫盒。
+async def _fake_json29q(default=None):
+    return {"index": 2, "direction": "up"}
+_wa29.request.json = _fake_json29q
+_res29q = asyncio.run(_wac29.move_config_image_bed())
+assert _res29q["data"]["saved"] is True and _res29q["data"]["index"] == 1, _res29q["data"]
+assert _res29q["data"]["direction"] == "up" and _res29q["data"]["moved"] == "猫盒", \
+    _res29q["data"]
+assert [e["name"] for e in _plugin29.config["image_upload_services"]] == \
+    ["本机", "猫盒", "catbox"], "上移必须与上一条目交换位置"
+assert [it["entry"]["name"] for it in _res29q["data"]["items"]] == \
+    ["本机", "猫盒", "catbox"], "响应 items 必须反映调整后的顺序"
+assert _plugin29.config["mc_servers"] == _mc_before29, "移动图床条目不得触碰 mc_servers"
+
+async def _fake_json29r(default=None):
+    return {"index": 1, "direction": "down"}
+_wa29.request.json = _fake_json29r
+_res29r = asyncio.run(_wac29.move_config_image_bed())
+assert _res29r["data"]["saved"] is True and _res29r["data"]["index"] == 2
+assert [e["name"] for e in _plugin29.config["image_upload_services"]] == \
+    ["本机", "catbox", "猫盒"], "下移必须与下一条目交换位置"
+assert _plugin29.reloads == 0 and _plugin29.image_bed_applys == 6, \
+    "移动必须走 apply_image_bed_config（免重连），且仅两次成功移动各生效一次"
+
+async def _fake_json29s(default=None):
+    return {"index": 0, "direction": "up"}
+_wa29.request.json = _fake_json29s
+assert asyncio.run(_wac29.move_config_image_bed())["status_code"] == 400, \
+    "首个条目上移应返回 400"
+async def _fake_json29t(default=None):
+    return {"index": 2, "direction": "down"}
+_wa29.request.json = _fake_json29t
+assert asyncio.run(_wac29.move_config_image_bed())["status_code"] == 400, \
+    "末个条目下移应返回 400"
+async def _fake_json29u(default=None):
+    return {"index": 1, "direction": "left"}
+_wa29.request.json = _fake_json29u
+assert asyncio.run(_wac29.move_config_image_bed())["status_code"] == 400, \
+    "非法 direction 应返回 400"
+async def _fake_json29v(default=None):
+    return {"index": 1}
+_wa29.request.json = _fake_json29v
+assert asyncio.run(_wac29.move_config_image_bed())["status_code"] == 400, \
+    "缺少 direction 应返回 400"
+async def _fake_json29w(default=None):
+    return {"index": "abc", "direction": "up"}
+_wa29.request.json = _fake_json29w
+assert asyncio.run(_wac29.move_config_image_bed())["status_code"] == 400, \
+    "非数字 index 应返回 400"
+async def _fake_json29x(default=None):
+    return {"index": True, "direction": "up"}
+_wa29.request.json = _fake_json29x
+assert asyncio.run(_wac29.move_config_image_bed())["status_code"] == 400, \
+    "布尔 index 应返回 400"
+# 失败的移动不得改动配置顺序（(g2) 两次成功移动后的顺序为 本机/catbox/猫盒）
+assert [e["name"] for e in _plugin29.config["image_upload_services"]] == \
+    ["本机", "catbox", "猫盒"], "非法移动请求不得改动图床顺序"
 _wa29.request.json = _orig_json29
 
 # (h) test：全量逐条结果透传 {ok, level, url, counts, failures[], warnings[],
@@ -5380,11 +5442,26 @@ assert "templateDisplayNames" in _js29, "syncImageBedFormTemplate 缺少模板�
 assert "const nameValue" in _js29, "模板 name 覆盖未使用模板默认名/显示文本兜底逻辑"
 assert "nameEl.value = templateDisplayNames[key] || key" in _js29, \
     "模板清单缺失兜底路径未重置 name 为对应模板文本"
+# (l7) 图床顺序调整：条目卡片必须展示序号徽标与「上移/下移」按钮，JS 必须
+# 调用 /config/image_bed/move 并在重排后交换测试结果键（否则结果错位），
+# 面板需有顺序说明，CSS 需有序号与提示样式
+for _need29 in ('data-ib-action="up"', 'data-ib-action="down"',
+                "moveImageBedEntry", "_swapImageBedTestResults",
+                "config/image_bed/move"):
+    assert _need29 in _js29, f"前端 JS 缺少图床顺序调整 {_need29}"
+assert 'id="ib-order-hint"' in _html29, "图床面板缺少顺序调整提示"
+assert ".ib-item-order" in _css29 and ".ib-order-hint" in _css29, \
+    "前端 CSS 缺少序号徽标/顺序提示样式"
+# 上移/下移单独成组放在操作行最右，与左侧 测试/编辑/启停/删除 分开
+assert 'class="ib-item-actions-order"' in _js29, \
+    "上移/下移按钮未单独成组（应置于操作行最右）"
+assert ".ib-item-actions-order" in _css29 and "margin-left: auto" in _css29, \
+    "前端 CSS 缺少顺序调整组右对齐样式"
 
 print("OK  路由注册 / 状态视图4字段兼容+items+building_running / 总开关关闭原因 / "
       "CRUD 默认值取 schema·不动 mc_servers / index 越界非数字→400 / "
       "switch 免重连·非法超时400 / test 全链结果透传 / builtin_status 运行态翻转 / "
-      "无MC配置图床仍启动 / apply_image_bed_config 幂等 / 前端静态守卫")
+      "无MC配置图床仍启动 / apply_image_bed_config 幂等 / 图床顺序移动 / 前端静态守卫")
 
 print("\n=== 45. main._on_queqiao_event 死亡/成就分支（as_text 幽灵方法回归） ===")
 # 回归：曾调用不存在的 event.death.as_text() / event.achievement.as_text()，

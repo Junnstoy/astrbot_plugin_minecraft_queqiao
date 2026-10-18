@@ -387,6 +387,8 @@ class DashboardApp {
       else if (action === 'toggle') this.toggleImageBedEntry(index);
       else if (action === 'delete') this.deleteImageBedEntry(index);
       else if (action === 'test') this.testImageBedEntry(index);
+      else if (action === 'up') this.moveImageBedEntry(index, 'up');
+      else if (action === 'down') this.moveImageBedEntry(index, 'down');
     });
   }
 
@@ -1654,7 +1656,8 @@ class DashboardApp {
 
     const builtinRunning = Array.isArray(status.builtin_running)
       ? status.builtin_running : [];
-    const html = items.map((it) => {
+    // 上传按列表顺序逐个尝试，故条目按位置展示序号并提供上移/下移（首尾禁用）
+    const html = items.map((it, pos) => {
       const kindLabel = it.kind === 'builtin' ? '内置HTTP' : '第三方图床';
       const stateCls = it.active ? 'ok' : 'warn';
       const stateTxt = it.active ? '已生效' : '未生效';
@@ -1665,8 +1668,10 @@ class DashboardApp {
       const detailHtml = it.detail
         ? `<div class="ib-item-detail">${escapeHtml(it.detail)}</div>` : '';
       const toggleLabel = it.enabled ? '停用' : '启用';
+      const orderTitle = '尝试顺序：越靠前越优先';
       return `<div class="ib-item ${it.active ? 'active' : 'inactive'}">
         <div class="ib-item-head">
+          <span class="ib-item-order" title="${orderTitle}">#${pos + 1}</span>
           <span class="ib-item-kind ${it.kind}">${kindLabel}</span>
           <span class="ib-item-name">${escapeHtml(it.name)}</span>
           ${runningMark}
@@ -1675,10 +1680,16 @@ class DashboardApp {
         ${detailHtml}
         ${reasonHtml}
         <div class="ib-item-actions">
-          <button type="button" class="btn btn-sm" data-ib-action="test" data-index="${it.index}">🧪 测试</button>
-          <button type="button" class="btn btn-sm" data-ib-action="edit" data-index="${it.index}">✏ 编辑</button>
-          <button type="button" class="btn btn-sm" data-ib-action="toggle" data-index="${it.index}">${toggleLabel}</button>
-          <button type="button" class="btn btn-sm btn-danger" data-ib-action="delete" data-index="${it.index}">🗑 删除</button>
+          <div class="ib-item-actions-main">
+            <button type="button" class="btn btn-sm" data-ib-action="test" data-index="${it.index}">🧪 测试</button>
+            <button type="button" class="btn btn-sm" data-ib-action="edit" data-index="${it.index}">✏ 编辑</button>
+            <button type="button" class="btn btn-sm" data-ib-action="toggle" data-index="${it.index}">${toggleLabel}</button>
+            <button type="button" class="btn btn-sm btn-danger" data-ib-action="delete" data-index="${it.index}">🗑 删除</button>
+          </div>
+          <div class="ib-item-actions-order">
+            <button type="button" class="btn btn-sm" data-ib-action="up" data-index="${it.index}" title="上移一位：${orderTitle}"${pos === 0 ? ' disabled' : ''}>⬆ 上移</button>
+            <button type="button" class="btn btn-sm" data-ib-action="down" data-index="${it.index}" title="下移一位：${orderTitle}"${pos === items.length - 1 ? ' disabled' : ''}>⬇ 下移</button>
+          </div>
         </div>
         <div class="ib-item-test-result hidden" data-test-result="${it.index}"></div>
       </div>`;
@@ -2017,6 +2028,66 @@ class DashboardApp {
       await this.loadImageBedEntries();
     } catch (e) {
       this.showToast('操作失败: ' + (e.message || '网络错误'), 'error');
+    }
+  }
+
+  // 条目展示名：优先 conf 原始条目的 name，其次运行态条目名，兜底 #下标
+  _imageBedEntryLabel(index) {
+    const confItem = (this.imageBedEntries || []).find(
+      (e) => String(e.index) === String(index)
+    );
+    const confName = confItem && confItem.entry && typeof confItem.entry === 'object'
+      ? String(confItem.entry.name || '').trim() : '';
+    if (confName) return confName;
+    const statusItems = (this.imageBedStatus && Array.isArray(this.imageBedStatus.items))
+      ? this.imageBedStatus.items : [];
+    const statusItem = statusItems.find((it) => String(it.index) === String(index));
+    const statusName = statusItem ? String(statusItem.name || '').trim() : '';
+    return statusName || `#${index}`;
+  }
+
+  // 上移/下移后交换两条目的单条目测试结果键：结果按 index 存储，
+  // 顺序变化后若不交换，重绘时结果会错挂到相邻条目上
+  _swapImageBedTestResults(fromIndex, toIndex) {
+    const from = String(fromIndex);
+    const to = String(toIndex);
+    if (from === to) return;
+    const results = this.imageBedTestResults || {};
+    const fromSaved = results[from];
+    const toSaved = results[to];
+    if (toSaved === undefined) delete results[from];
+    else results[from] = toSaved;
+    if (fromSaved === undefined) delete results[to];
+    else results[to] = fromSaved;
+    this.imageBedTestResults = results;
+  }
+
+  // 调整条目尝试顺序（上移/下移）：上传按列表顺序逐个尝试，越靠前越优先。
+  // 请求期间禁用被点按钮防重复点击；成功后先交换测试结果键再重拉数据，
+  // 否则按 index 存的单条目测试结果会因下标重排而错位
+  async moveImageBedEntry(index, direction) {
+    const dir = direction === 'down' ? 'down' : 'up';
+    const btn = document.querySelector(
+      `#ib-list button[data-ib-action="${dir}"][data-index="${index}"]`
+    );
+    if (btn) btn.disabled = true;
+    const label = this._imageBedEntryLabel(index);
+    try {
+      const resp = await this.apiPost('config/image_bed/move', { index, direction: dir });
+      const data = (resp && resp.data) ? resp.data : resp;
+      let newIndex = data ? Number(data.index) : NaN;
+      if (!Number.isFinite(newIndex)) {
+        // 后端成功必返回新位置；缺失时按方向推一位兜底
+        newIndex = Number(index) + (dir === 'up' ? -1 : 1);
+      }
+      this.showToast(`图床条目「${label}」已${dir === 'up' ? '上移' : '下移'}`, 'success');
+      this._swapImageBedTestResults(index, newIndex);
+      await this.loadImageBedStatus();
+      await this.loadImageBedEntries();
+    } catch (e) {
+      this.showToast('调整顺序失败: ' + (e.message || '网络错误'), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 

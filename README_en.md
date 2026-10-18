@@ -1,7 +1,7 @@
 <div align="center">
 <h1>Minecraft Queqiao</h1>
 <p><strong>Connect Minecraft servers to AstrBot via the QueQiao mod for message and image bridging, server management and AI chat</strong></p>
-<p><img alt="version" src="https://img.shields.io/badge/version-v0.6.7-blue"></p>
+<p><img alt="version" src="https://img.shields.io/badge/version-v0.6.8-blue"></p>
 <p><sub>Minecraft &nbsp;&nbsp; QueQiao &nbsp;&nbsp; Message Bridge &nbsp;&nbsp; Image Bridge &nbsp;&nbsp; AI Chat</sub></p>
 <p><a href="README.md">中文</a> &nbsp;/&nbsp; <strong>English</strong></p>
 </div>
@@ -16,7 +16,7 @@ Connects Minecraft servers to AstrBot through the [QueQiao](https://github.com/1
 - **Connection notification**: send a “server started” / “connection failed” notice to the target sessions when the server connects or fails to connect, with customizable templates
 - **Server management**: status queries, online player list, remote command execution
 - **Web Dashboard**: view server status, performance monitoring (TPS / latency), the bridge terminal in real time and connection observability (reconnect count / phase / limit alert, API timeout count), with quick broadcast and command console
-- **Image-bed panel**: a dedicated “🖼️ 图床” tab at the right end of the dashboard's server-tab bar to manage image transfer directly — the master switch, upload timeout, full add/edit/delete of image bed entries, the built-in HTTP service runtime state, and a one-click test upload that runs the whole chain with built-in probe images and colour-codes the result (green / yellow / red) by ChatImage compatibility
+- **Image-bed panel**: a dedicated “🖼️ 图床” tab at the right end of the dashboard's server-tab bar to manage image transfer directly — the master switch, upload timeout, full add/edit/delete and reordering of image bed entries, the built-in HTTP service runtime state, and a one-click test upload that runs the whole chain with built-in probe images and colour-codes the result (green / yellow / red) by ChatImage compatibility
 - **Manage servers from the panel**: create servers, enable / disable, edit connection settings and target sessions, or delete entries right from the dashboard; disabled servers stay visible as grey cards and can be enabled with one click — saving backs up the config and hot-reloads automatically
 - **AI chat**: talk to the AI in-game with the `ai` prefix; replies are sent privately to the player
 - **Multiple servers**: connect several servers, each with independent forwarding settings
@@ -73,6 +73,7 @@ The dashboard has a dedicated “🖼️ 图床” (Image Bed) tab pinned at the
 - **Master switch & timeout**: the root-level `enable_image_upload` (when off, no upload is attempted) and `image_upload_timeout` (upload timeout in seconds) are toggled / edited at the top of the panel and take effect on save
 - **Full entry management**: each entry is a card showing its kind (built-in / third-party), enabled state, why it is (or is not) active (disabled entry / invalid URL / wrong response type are all spelled out), address and runtime state; “new” entries are created with the template defaults filled in, editing covers every field, and deletion asks for confirmation
 - **Built-in HTTP service runtime**: `builtin_http` entries show a “running / not running” badge reflecting the real state (not started / stopped / failed to start)
+- **Reorder entries**: the “⬆ 上移 / ⬇ 下移” (move up / move down) buttons on each card set the order in which image beds are tried; uploads walk the list from top to bottom, so the higher an entry sits the earlier it is tried, and the new order takes effect as soon as you save
 - **🧪 Test upload**: with no parameters at all, a built-in PNG probe is pushed through the whole upload chain per entry and the hosted image is read back to verify its real format, with the result colour-coded — 🟢 **green = pass** (the produced format can be rendered by ChatImage), 🟡 **yellow = usable but limited** (the image bed re-encodes images to webp, which ChatImage cannot render, so the upload succeeds but nothing shows in game) and 🔴 **red = failed** (listed as “image-bed name: reason”) — configuration problems are identified in one click
 
 Every save is **partial-effect** (only the image-transfer subsystem is rebuilt; no MC connection is touched). The image-transfer subsystem is also decoupled from the MC server config, so the image bed starts even when no server is configured at all.
@@ -234,7 +235,7 @@ Pre-configured templates:
 </details>
 
 - No `picui` template: it re-encodes every image to webp, which ChatImage cannot display; use the `custom` template and fill in the endpoint yourself if you still need one
-- Multiple enabled entries are **tried in list order**; the first success is broadcast into the game; when all fail, a warning aggregates each failure as `name: reason`
+- Multiple enabled entries are **tried in list order** (use the “⬆ 上移 / ⬇ 下移” buttons in the panel to change which one comes first); the first success is broadcast into the game; when all fail, a warning aggregates each failure as `name: reason`
 - ⚠️ **Privacy notice**: group images are uploaded to the image bed — enable only when needed
 - ⚠️ **webp images may not show up**: rendering in game depends on ChatImage, which only supports png / jpg / jpeg / jfif / gif / ico / bmp and **does not support webp**. Images in chat are mostly png / jpg, but some image beds re-encode everything they host to webp; when the resulting link is webp the chat bar shows no picture (only the code text). “🧪 Test upload” sends a single PNG and reads the hosted image back to check its format: png / jpg and friends turn it green, while a product that became webp turns it yellow. A yellow result means the image bed re-encodes images to webp — switch to one that stores images as-is (such as `pngurl` or `img402.dev`)
 

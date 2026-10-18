@@ -2237,6 +2237,14 @@ body {
 }
 
 /* 条目列表 */
+/* 顺序说明：图床上传按列表从上到下依次尝试 */
+.ib-order-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
 .ib-list-inner {
   display: flex;
   flex-direction: column;
@@ -2266,6 +2274,18 @@ body {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* 条目尝试顺序徽标（上传按该顺序逐个尝试，越靠前越优先） */
+.ib-item-order {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: color-mix(in srgb, var(--border-color) 45%, transparent);
+  color: var(--text-secondary);
 }
 
 .ib-item-kind {
@@ -2341,8 +2361,24 @@ body {
 
 .ib-item-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
+}
+
+/* 左侧操作组：测试 / 编辑 / 启用 / 删除 */
+.ib-item-actions-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 顺序调整组单独靠最右，与左侧操作保持间隔、不贴在一起 */
+.ib-item-actions-order {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 /* 兼容旧主题缺省变量 */

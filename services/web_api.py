@@ -276,6 +276,12 @@ class WebApiController:
                 ["POST"],
                 "删除图床条目并局部生效",
             ),
+            (
+                "/config/image_bed/move",
+                self.move_config_image_bed,
+                ["POST"],
+                "调整图床条目尝试顺序并局部生效（上移/下移）",
+            ),
             ("/reverse/servers", self.get_reverse_servers, ["GET"], "反向共享 WS 服务端状态"),
             (
                 "/config/servers",
@@ -1879,6 +1885,50 @@ class WebApiController:
             return error_response(f"删除图床条目失败: {exc}", status_code=500)
         logger.info(f"[{PLUGIN_NAME}] 面板删除图床条目: #{position} ({removed_key})")
         return self._image_bed_response(saved=True, removed=removed_key)
+
+    async def move_config_image_bed(self) -> Any:
+        """上移 / 下移图床条目并局部生效，用于调整图床尝试的优先顺序。
+
+        上传按 ``image_upload_services`` 的列表顺序逐个尝试，因此调整列表
+        顺序即调整图床优先级。请求体：``index`` 定位条目，``direction`` 为
+        ``up`` 或 ``down``；已处于首/尾时返回 400（面板同时禁用边界按钮）。
+        """
+        if self.plugin is None:
+            return error_response("插件实例未注入，无法修改配置", status_code=503)
+        payload = await request.json(default={}) or {}
+        if not isinstance(payload, dict):
+            return error_response("请求体需为 JSON 对象", status_code=400)
+
+        direction = str(payload.get("direction") or "").strip().lower()
+        if direction not in ("up", "down"):
+            return error_response("direction 需为 up 或 down", status_code=400)
+
+        entries = copy.deepcopy(self._conf_image_entries())
+        found = self._find_image_entry(entries, payload.get("index"))
+        if found is None:
+            return error_response("未找到对应的图床条目（index 无效）", status_code=400)
+        position, entry = found
+
+        target = position - 1 if direction == "up" else position + 1
+        if target < 0:
+            return error_response("该条目已在列表最前，无法上移", status_code=400)
+        if target >= len(entries):
+            return error_response("该条目已在列表最后，无法下移", status_code=400)
+
+        entries[position], entries[target] = entries[target], entries[position]
+        try:
+            await self._persist_config(self._conf_with_image_entries(entries), reload=False)
+        except Exception as exc:
+            logger.exception(f"[{PLUGIN_NAME}] 调整图床条目顺序失败")
+            return error_response(f"调整图床条目顺序失败: {exc}", status_code=500)
+        name = self._image_entry_name(entry, self._image_entry_kind(entry))
+        logger.info(
+            f"[{PLUGIN_NAME}] 面板调整图床条目顺序: {name} "
+            f"#{position} → #{target}（{'上移' if direction == 'up' else '下移'}）"
+        )
+        return self._image_bed_response(
+            saved=True, index=target, direction=direction, moved=name
+        )
 
     def get_panel_prefs(self) -> Any:
         """获取面板级偏好（互通终端加载天数等，长期存储在后端）。
