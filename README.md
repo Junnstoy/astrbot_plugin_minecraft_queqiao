@@ -76,8 +76,8 @@
 
 - **总开关与超时**：根级 `enable_image_upload`（关闭后不再尝试上传）与 `image_upload_timeout`（上传超时，秒）在面板顶部直接切换 / 修改，保存即生效
 - **条目完整增删改**：每个图床条目一张卡片，展示类型（内置 / 第三方）、启用状态、生效原因（未启用 / 地址不合法 / 响应类型错误都会标出）、地址与运行态；「新建」按配置模板补齐默认值，编辑可改全部字段，删除需二次确认
-- **内置 HTTP 服务运行态**：`builtin_http` 条目单独展示「运行中 / 未运行」徽标（未启动 / 已停止 / 启动失败都会如实反映）
 - **顺序调整**：每张卡片上有「⬆ 上移 / ⬇ 下移」按钮，可直接调整图床尝试顺序；上传时按列表**从上到下**依次尝试，越靠前越优先，保存后立即生效
+- **内置 HTTP 服务运行态**：`builtin_http` 条目单独展示「运行中 / 未运行」徽标（未启动 / 已停止 / 启动失败都会如实反映）
 - **🧪 测试上传**：不填任何参数，用内置 PNG 探针图按条目顺序跑一遍完整上传链，并回读图床返回的图片核对真实格式，结果按三色标注——🟢 **绿灯 = 通过**（产物格式 ChatImage 能显示）、🟡 **黄灯 = 可用但受限**（图床把图片转成了 webp 这类 ChatImage 显示不出来的格式，传得上去但游戏里看不到）、🔴 **红灯 = 失败**（按「图床名: 原因」列出），一步定位配置问题
 
 保存全部走**局部生效**（只重建图片转存子系统，不重连任何 MC 服务器）；且图床子系统与 MC 服务器配置解耦——一台服务器都没配时图床也能独立启动。
@@ -202,7 +202,7 @@
 
 1. 打开根级开关 `enable_image_upload`
 2. 按需调整 `image_upload_timeout`（图床上传超时，默认 30 秒）
-3. 在 `image_upload_services` 添加图床条目：默认不加载任何图床，最上方为「自定义图床」（自由填写任意上传接口），其余为预配置模板（接口与响应方式已填好，按需补 token）
+3. 在 `image_upload_services` 添加图床条目：默认不加载任何图床；「新建」可选「内置图片HTTP服务」「自定义图床」（自由填写任意上传接口）或预配置模板（接口与响应方式已填好，按需补 token）
 
 > 💡 以上三步都能在仪表盘「🖼️ 图床」面板里完成：总开关与超时在面板顶部，条目用「新建 / 编辑」按模板填写，「🧪 测试上传」可直接验证配置是否生效。
 
@@ -211,9 +211,9 @@
 | `enabled` | bool | `true` | 启用此图床条目 |
 | `name` | string | 空 | 显示名称（仅日志/辨识用） |
 | `upload_url` | string | 空 | 图床的**上传接口地址（完整 URL，非网站首页）** |
-| `token` | string | 空 | API Token（作为 `Authorization: Bearer` 请求头并附带表单字段 `token`）；免 token 留空 |
+| `token` | string | 空 | API Token（默认作为 `Authorization: Bearer` 请求头并附带表单字段 `token`；imgbb 例外，以表单字段 `key` 提交）；免 token 留空 |
 | `response` | string | `text` | 响应解析：`text` = 响应正文即链接；`json` = 取 `url` 字段（无则取第一个 `http(s)://` 字段） |
-| `file_field` | string | `file` | multipart 文件字段名（个别图床为 `image`、`fileToUpload` 等） |
+| `file_field` | string | `file` | multipart 文件字段名（img402 / imgbb 为 `image`，S.EE 为 `smfile`） |
 | `headers` | string | 空 | 自定义请求头：一行一个 `名字: 值`（或 JSON 对象） |
 | `form_fields` | string | 空 | 额外普通表单字段：一行一个 `名字: 值`（或 JSON 对象） |
 
@@ -224,21 +224,17 @@
 
 | 模板 | 地区 | Token | 响应 | 大小/配额 | 说明 |
 |------|------|-------|------|-----------|------|
-| `catbox` | 海外 | 免 | `text` | ≤200MB/张 | 匿名直传 |
-| `litterbox` | 海外 | 免 | `text` | ≤1GB/张 | catbox 临时分支，图片到期自动删除（`form_fields` 已预填 `time: 72h`） |
-| `imglink` | 海外 | 免 | `json` | ≤25MB/张 | 匿名直传，服务端会重新编码图片 |
-| `img402.dev` | 海外 | 免 | `json` | ≤10MB/张 | 文件字段为 `image`；≤1MB 永久保存、1–10MB 保留 30 天 |
-| `pngurl` | 国内 | 免 | `json` | — | 原 pngcdn.cn 迁移而来 |
+| `imglink` | 海外 | 免 | `json` | ≤25MB/张 | 匿名直传，服务端会重新编码图片；偶尔较慢 |
+| `img402.dev` | 海外 | 免 | `json` | ≤10MB/张 | 文件字段为 `image`；≤1MB 永久保存、1–10MB 保留 30 天；走 Cloudflare，偶发超时 |
+| `pngurl` | 国内 | 免 | `json` | — | 原 pngcdn.cn 迁移而来；访客有频率限制，长期使用建议注册填 token |
 | `anyapi` | 国内中转 | 免 | `json` | 建议 ≤10MB/文件 | anyapi 中转代理 |
-| `xinyew` | 国内 | 免 | `json` | — | 360 图床 |
-| `xunjinlu` | 国内 | 免 | `json` | — | 多接口聚合，按文件大小自动选上游 |
-| `imgloc` | 国内 | 需 | `json` | 约 6MB/张 | 路过图床，需注册获取 token |
-| `see` | 国内 | 需 | `json` | ≤5MB/张 | S.EE / sm.ms，文件字段为 `smfile` |
-| `imgbb` | 海外 | 需 | `json` | ≤32MB/张 | 老牌 API，文件字段为 `image` |
+| `see` | 国内 | 需 | `json` | ≤5MB/张 | S.EE / sm.ms，文件字段为 `smfile`，key 直接填在请求头 |
+| `imgbb` | 海外 | 需 | `json` | ≤32MB/张 | 老牌 API，文件字段为 `image`，key 以表单字段 `key` 提交 |
 
 </details>
 
-- 不提供 `picui` 模板：它会把任何图片一律转成 webp 输出，而 ChatImage 显示不出来；确有需要可用 `custom` 模板自行填写接口地址
+- 只保留实测能连通的模板：`catbox` / `litterbox`（请求被拦截）、`imgloc`（接口域名已失效）、`xinyew` / `xunjinlu`（被 WAF 拦截）、`picui`（只输出 webp，游戏里显示不出来）等模板已移除；确有需要仍可用 `custom` 模板自行填写接口地址
+- 上传时按图片**真实格式**携带 MIME 与文件名后缀（png / jpg / webp 等），避免图床把图片当成普通文件拒收
 - 多个启用条目按列表顺序**逐个尝试**（可在面板用「⬆ 上移 / ⬇ 下移」调整优先顺序），任一成功即广播进游戏；全部失败时按「图床名: 原因」汇总告警
 - ⚠️ **隐私提醒**：群图片会被上传到图床，请按需开启
 - ⚠️ **webp 图片可能显示不出来**：游戏端渲染依赖 ChatImage，而 ChatImage 只认 png / jpg / jpeg / jfif / gif / ico / bmp，**不支持 webp**。群里的图片以 png / jpg 为主，但有些图床会把上传的图片统一重新编码成 webp，拿到的链接是 webp 时游戏聊天栏就显示不出图片（只留一行代码文本）。「🧪 测试上传」只传一张 PNG 并把产物读回来核对格式：产物是 png / jpg 等则亮绿灯，产物被转成 webp 则亮黄灯。看到黄灯说明该图床会把图片转成 webp，可换一个原样转存的图床（如 `pngurl`、`img402.dev`）

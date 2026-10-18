@@ -671,18 +671,12 @@
             <select id="ibf-template" title="图床方案模板：字段默认值取自 conf schema">
               <option value="builtin_http">builtin_http · 内置图片HTTP服务</option>
               <option value="custom">custom · 通用图床接口</option>
-              <option value="catbox">catbox</option>
-              <option value="litterbox">litterbox</option>
               <option value="imglink">imglink</option>
-              <option value="imgloc">imgloc</option>
               <option value="img402">img402</option>
               <option value="pngurl">pngurl</option>
+              <option value="anyapi">anyapi</option>
               <option value="see">see</option>
               <option value="imgbb">imgbb</option>
-              <option value="picui">picui</option>
-              <option value="anyapi">anyapi</option>
-              <option value="xinyew">xinyew</option>
-              <option value="xunjinlu">xunjinlu</option>
             </select>
           </span>
           <span class="modal-row-hint">切换模板会重置为该方案的字段默认值；其余字段随下方显示</span>
@@ -696,7 +690,7 @@
         <label class="modal-row">
           <span class="modal-row-label">条目名称</span>
           <span class="modal-row-control">
-            <input type="text" id="ibf-name" placeholder="如：我的NAS / catbox" />
+            <input type="text" id="ibf-name" placeholder="如：我的NAS / pngurl" />
           </span>
           <span class="modal-row-hint">面板与测试结果里展示的名字；留空自动按类型取名</span>
         </label>
@@ -718,7 +712,7 @@
         <label class="modal-row hidden" id="ibf-row-third-url">
           <span class="modal-row-label">上传地址</span>
           <span class="modal-row-control">
-            <input type="text" id="ibf-upload-url" placeholder="https://catbox.moe/user/api.php" />
+            <input type="text" id="ibf-upload-url" placeholder="https://img402.dev/api/free" />
           </span>
           <span class="modal-row-hint">图床的上传接口地址，必须是 http(s):// 开头；留空则该条目不生效</span>
         </label>
@@ -727,7 +721,7 @@
           <span class="modal-row-control">
             <input type="text" id="ibf-token" />
           </span>
-          <span class="modal-row-hint">图床要求的鉴权令牌（可选，具体格式看图床文档）</span>
+          <span class="modal-row-hint">图床要求的鉴权令牌（可选）：多数图床按 Bearer 发送，imgbb 会作为表单字段 key 提交；S.EE 请改用请求头</span>
         </label>
         <label class="modal-row hidden" id="ibf-row-third-response">
           <span class="modal-row-label">响应解析</span>
@@ -744,7 +738,7 @@
           <span class="modal-row-control">
             <input type="text" id="ibf-file-field" placeholder="file" />
           </span>
-          <span class="modal-row-hint">multipart 上传时的文件字段名（catbox 为 fileToUpload）</span>
+          <span class="modal-row-hint">multipart 上传时的文件字段名（img402 / imgbb 为 image，S.EE 为 smfile）</span>
         </label>
         <label class="modal-row hidden" id="ibf-row-third-headers">
           <span class="modal-row-label">请求头</span>
@@ -758,7 +752,7 @@
           <span class="modal-row-control">
             <textarea id="ibf-form-fields" rows="2" placeholder="每行一个：名字: 值"></textarea>
           </span>
-          <span class="modal-row-hint">multipart 额外字段（litterbox 必填 `time: 72h`）；格式同请求头</span>
+          <span class="modal-row-hint">少数图床要求的额外普通表单字段（如 `time: 72h`）；格式同请求头</span>
         </label>
       </div>
       <div class="modal-actions">

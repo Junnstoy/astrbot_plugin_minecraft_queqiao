@@ -194,8 +194,8 @@ class DashboardApp {
     // 模板选择器里除 builtin/custom 外的第三方模板键（与 _conf_schema.json
     // 的 image_upload_services.templates 键集合对齐；后端模板接口未拉到时兜底）
     this.imageBedTemplateKeys = [
-      'builtin_http', 'custom', 'catbox', 'litterbox', 'imglink', 'imgloc',
-      'img402', 'pngurl', 'see', 'imgbb', 'anyapi', 'xinyew', 'xunjinlu',
+      'builtin_http', 'custom', 'imglink', 'img402', 'pngurl', 'anyapi',
+      'see', 'imgbb',
     ];
   }
 
@@ -1794,13 +1794,15 @@ class DashboardApp {
     setVal('ibf-form-fields', this._fieldsToLines(raw.form_fields));
   }
 
-  // headers/form_fields 的「名字: 值」行文本 ↔ 字段存储格式互转
+  // headers/form_fields 的「名字: 值」行文本 ↔ 字段存储格式互转。
+  // 存储用换行（与后端 parse_headers/parse_form_fields 的 splitlines 对齐）；
+  // 读取时同时兼容早期面板写下的 `|` 分隔格式
   _fieldsToLines(value) {
     if (!value) return '';
     const s = String(value).trim();
     if (s.startsWith('{')) return s; // JSON 对象原样展示
     const lines = [];
-    for (const part of s.split('|')) {
+    for (const part of s.split(/[|\n]/)) {
       const p = part.trim();
       if (p) lines.push(p);
     }
@@ -1811,7 +1813,7 @@ class DashboardApp {
     const s = String(value || '').trim();
     if (!s) return '';
     if (s.startsWith('{')) return s;
-    return s.split('\n').map(l => l.trim()).filter(Boolean).join('|');
+    return s.split(/\r?\n/).map(l => l.trim()).filter(Boolean).join('\n');
   }
 
   // 模板下拉变化：按模板显示/隐藏专属字段行，并回填各自默认值。
@@ -1833,16 +1835,22 @@ class DashboardApp {
       const row = document.getElementById(id);
       if (row) row.classList.toggle('hidden', !show);
     };
+    // 按模板 defaults 回填：与后端 _new_image_entry 生成的新条目默认值同源
+    const template = this.imageBedTemplates ? this.imageBedTemplates[key] : null;
+    const defaults = template && template.defaults ? template.defaults : null;
+    // 第三方模板的字段按模板声明显示：see 不显示 token（它用 Authorization
+    // 请求头直传）、imgbb 不需要 headers；模板清单未拉到时全显示，避免
+    // 因接口失败把可用字段藏起来
+    const hasField = (name) => !defaults
+      || Object.prototype.hasOwnProperty.call(defaults, name);
     toggleRow('ibf-row-builtin-host', isBuiltin);
     toggleRow('ibf-row-builtin-url', isBuiltin);
     toggleRow('ibf-row-third-url', !isBuiltin);
-    toggleRow('ibf-row-third-token', !isBuiltin);
+    toggleRow('ibf-row-third-token', !isBuiltin && hasField('token'));
     toggleRow('ibf-row-third-response', !isBuiltin);
-    toggleRow('ibf-row-third-file', !isBuiltin);
-    toggleRow('ibf-row-third-headers', !isBuiltin);
-    toggleRow('ibf-row-third-forms', !isBuiltin);
-    // 按模板 defaults 回填：与后端 _new_image_entry 生成的新条目默认值同源
-    const template = this.imageBedTemplates ? this.imageBedTemplates[key] : null;
+    toggleRow('ibf-row-third-file', !isBuiltin && hasField('file_field'));
+    toggleRow('ibf-row-third-headers', !isBuiltin && hasField('headers'));
+    toggleRow('ibf-row-third-forms', !isBuiltin && hasField('form_fields'));
     if (template && template.defaults) {
       const d = template.defaults;
       const applyDefault = (elId, value) => {
@@ -1935,12 +1943,26 @@ class DashboardApp {
       payload.port = (document.getElementById('ibf-port')?.value || '').trim();
       payload.base_url = (document.getElementById('ibf-base-url')?.value || '').trim();
     } else {
+      // 只提交当前模板声明了的字段：see 没有 token 字段，若把 token 也存进
+      // 条目，后端会按通用流程发 Authorization: Bearer，与 S.EE 的鉴权格式冲突
+      const template = this.imageBedTemplates ? this.imageBedTemplates[templateKey] : null;
+      const defaults = template && template.defaults ? template.defaults : null;
+      const hasField = (name) => !defaults
+        || Object.prototype.hasOwnProperty.call(defaults, name);
       payload.upload_url = (document.getElementById('ibf-upload-url')?.value || '').trim();
-      payload.token = (document.getElementById('ibf-token')?.value || '').trim();
       payload.response = (document.getElementById('ibf-response')?.value || 'text').trim();
-      payload.file_field = (document.getElementById('ibf-file-field')?.value || '').trim();
-      payload.headers = this._linesToFields(document.getElementById('ibf-headers')?.value);
-      payload.form_fields = this._linesToFields(document.getElementById('ibf-form-fields')?.value);
+      if (hasField('token')) {
+        payload.token = (document.getElementById('ibf-token')?.value || '').trim();
+      }
+      if (hasField('file_field')) {
+        payload.file_field = (document.getElementById('ibf-file-field')?.value || '').trim();
+      }
+      if (hasField('headers')) {
+        payload.headers = this._linesToFields(document.getElementById('ibf-headers')?.value);
+      }
+      if (hasField('form_fields')) {
+        payload.form_fields = this._linesToFields(document.getElementById('ibf-form-fields')?.value);
+      }
     }
     return payload;
   }

@@ -1779,7 +1779,7 @@ class WebApiController:
     async def create_config_image_bed(self) -> Any:
         """新建图床条目并局部生效（不触碰 MC 连接）。
 
-        请求体：``{"template_key": "builtin_http"|"custom"|"catbox"|...}`` 必填，
+        请求体：``{"template_key": "builtin_http"|"custom"|"imglink"|...}`` 必填，
         条目其余字段按 schema 模板默认值补齐；仅显式出现的字段覆盖默认值。
         """
         if self.plugin is None:

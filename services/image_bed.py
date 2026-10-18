@@ -14,16 +14,17 @@
 
 第三方图床**不限定服务商名单**：图床条目里填上传接口地址 + 响应解析方式
 即可接入任意图床。统一的上传协议：
-- `POST <upload_url>`，multipart 表单，文件字段名为 `file`
-  （catbox.moe 自带上传接口特殊兼容：自动附加 `reqtype=fileupload` 并使用
-  `fileToUpload` 字段名）；
-- 若条目填了 `token`，同时携带 `Authorization: Bearer <token>` 请求头
-  与表单字段 `token`（imgloc / 兰空等按各自习惯读取其一）；
+- `POST <upload_url>`，multipart 表单，文件字段名为条目配置的 `file_field`；
+  文件段的 `Content-Type` 与文件名后缀按真实字节嗅探——图床会把
+  `application/octet-stream` 当非图片拒收，也会校验后缀与内容是否一致；
+- 若条目填了 `token`，默认携带 `Authorization: Bearer <token>` 请求头
+  与表单字段 `token`（兰空等按各自习惯读取其一）；imgbb 例外——
+  它的鉴权参数是表单字段 `key`，插件按该格式提交；
 - 若条目配了 `form_fields`，额外字段一并作为 multipart 表单发送
-  （litterbox 必填 `time=72h` 指定保留时长，不带则服务端返回 500）；
+  （部分临时图床要求 `time: 72h` 这类保留时长字段）；
 - 响应解析由条目 `response` 决定：`text` = 响应正文就是图片链接
   （catbox 等）；`json` = 优先取键名为 `url` 的字段，否则按字段顺序取
-  第一个形如 `http(s)://` 的字符串（imgloc / 兰空 / sm.ms / pngurl 等）。
+  第一个形如 `http(s)://` 的字符串（兰空 / sm.ms / pngurl 等）。
 
 注意隐私与稳定性：第三方图床会把群图片上传到外部服务，请按需开启。
 总开关在根级配置 `enable_image_upload`；条目自身的 `enabled` 可单独关闭。
@@ -43,7 +44,7 @@ from ..core.constants import (
     DEFAULT_IMAGE_UPLOAD_TIMEOUT,
     PLUGIN_NAME,
 )
-from .image_host import ImageHost, sniff_image_format
+from .image_host import ImageHost, guess_image_content_type, sniff_image_format
 
 # 第三方图床单次上传超时（秒）的默认值；实际取值由根级配置
 # `image_upload_timeout` 决定，构造条目时注入
@@ -72,6 +73,18 @@ _URL_EXT_FORMATS = {
     "ico": "ico",
     "bmp": "bmp",
     "webp": "webp",
+    "avif": "avif",
+}
+
+# 格式短名 → 上传文件名后缀。必须用真实格式：部分图床（imglink 等）会校验
+# 「文件内容与后缀一致」，webp 图配 .png 后缀会被直接拒收。
+_FILENAME_EXTENSIONS = {
+    "png": "png",
+    "jpeg": "jpg",
+    "gif": "gif",
+    "webp": "webp",
+    "bmp": "bmp",
+    "ico": "ico",
     "avif": "avif",
 }
 
@@ -131,6 +144,7 @@ def _parse_key_value_lines(raw: str) -> dict | None:
 
     支持两种写法：
     - 每行一个 `名字: 值`（如 `Accept: application/json`、`time: 72h`）；
+      面板早期版本按 `|` 拼成一行存储，这里一并按分隔符拆开，旧配置仍可用；
     - 整个值以 `{` 开头则按 JSON 对象解析（如 `{"X-Api-Key": "abc"}`）。
     值为空的条目会被忽略，避免发出 `Authorization: ` 这种空值键。
     """
@@ -153,7 +167,7 @@ def _parse_key_value_lines(raw: str) -> dict | None:
                 result[key] = str(value).strip()
         return result or None
     result = {}
-    for line in raw.splitlines():
+    for line in raw.replace("|", "\n").splitlines():
         line = line.strip()
         if not line or ":" not in line:
             continue
@@ -178,9 +192,9 @@ def parse_headers(raw: str) -> dict | None:
 def parse_form_fields(raw: str) -> dict | None:
     """把条目自定义表单字段配置解析为 dict；非法/空返回 None。
 
-    用于图床要求的额外 multipart 字段（litterbox 必填 `time=72h`，
-    不带该字段服务端直接返回 500）。格式与 `headers` 一致：
-    一行一个 `名字: 值`，或 JSON 对象。
+    用于图床要求的额外 multipart 字段（部分临时存储要求 `time: 72h`
+    指定保留时长，不带该字段服务端会报错）。格式与 `headers` 一致：
+    一行一个 `名字: 值`（或 `|` 分隔），或 JSON 对象。
     """
     return _parse_key_value_lines(raw)
 
@@ -424,17 +438,30 @@ class ImageBedUploader:
         # catbox 系特殊兼容（字段名 fileToUpload + reqtype）；其余图床按
         # 条目配置的 file_field 发送（绝大多数是 file，img402 是 image）
         file_field = "fileToUpload" if is_catbox else self.file_field
-        form.add_field(file_field, data, filename=self._filename())
+        # 文件段必须带真实图片 MIME 与对应后缀：aiohttp 默认发
+        # application/octet-stream，anyapi 等图床会直接拒收；imglink 还会
+        # 校验后缀与内容是否一致（webp 配 .png 会 400）
+        form.add_field(
+            file_field,
+            data,
+            filename=self._filename(data),
+            content_type=guess_image_content_type(data),
+        )
         if is_catbox:
             form.add_field("reqtype", "fileupload")
-        # 额外 multipart 字段（litterbox 必填 time=72h 指定保留时长）
+        # 额外 multipart 字段（部分临时图床要求 time: 72h 指定保留时长）
         for key, value in (self.form_fields or {}).items():
             form.add_field(key, value)
         headers = dict(self.headers) if self.headers else None
+        # imgbb 的鉴权参数是表单字段 key（不是 Bearer），按它的格式提交
+        is_imgbb = "imgbb.com" in self.upload_url
         if self.token:
-            headers = headers or {}
-            headers["Authorization"] = f"Bearer {self.token}"
-            form.add_field("token", self.token)
+            if is_imgbb:
+                form.add_field("key", self.token)
+            else:
+                headers = headers or {}
+                headers["Authorization"] = f"Bearer {self.token}"
+                form.add_field("token", self.token)
         async with session.post(
             self.upload_url, data=form, headers=headers
         ) as resp:
@@ -452,8 +479,10 @@ class ImageBedUploader:
         return url
 
     @staticmethod
-    def _filename() -> str:
-        return f"astrbot_{uuid.uuid4().hex}.png"
+    def _filename(data: bytes) -> str:
+        """按真实字节给上传文件名；后缀与内容不一致会被部分图床拒收。"""
+        extension = _FILENAME_EXTENSIONS.get(sniff_image_format(data), "png")
+        return f"astrbot_{uuid.uuid4().hex}.{extension}"
 
 
 class ImageBedUploaderGroup:

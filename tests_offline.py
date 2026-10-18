@@ -1435,24 +1435,15 @@ assert list(_tpls28)[1] == "custom", "第二个应是「自定义图床」"
 # 这是它和第三方图床最关键的区别，必须在模板 hint 里讲明
 assert "公网" in _tpls28["builtin_http"]["hint"], \
     "内置条目 hint 应提示需要公网可达地址"
-# 只保留实测可用的图床：0x0（官方暂停上传）、tutu（接口已拒绝跨站 POST）、
-# imgur（官方 API 与 Bearer token 不兼容）、postimages（已转 Drive Hosting，
-# 匿名上传被 403 拒绝并要求 api.postimages.org 的 key）、
-# postimg.org（DNS 失效）、shturl.cc（域名不存在，NXDOMAIN）、
-# imgurl.cc（TLS 握手挂起超时）、tukr.com（域名已改为美国餐厅点评站，
-# 图壳服务已死）、sxcu.net（整站 Cloudflare JS 盾，非浏览器无法过）、
-# ctrlq/hostpic/unsee/fb.pics/freeimg/48pic/ooonline/52img 等
-# （DNS 失效或连接超时）已移除；pngcdn.cn 迁移到 pngurl.com 后实测访客
-# 上传可用，以 pngurl 模板恢复；picui 虽上传可用，但实测会把任何图片
-# 一律转成 webp 输出（ChatImage 显示不出来），对本项目无意义，故移除模板；
-# anyapi / xinyew / xunjinlu 均为用户提供、实测游客免 token 上传可用后
-# 新增；imglink / litterbox 为
-# 实测匿名直传可用后新增（litterbox 端点须为 /resources/internals/api.php，
-# 文档常见的 /api/upload.php 已 404）
+# 只保留实测可用的图床（2026-10-19 在本机复查）：
+# - 可用：imglink / img402 / pngurl（匿名直传）、anyapi（补文件 MIME 后可用）
+# - 需 token：see / imgbb
+# - 已移除：catbox（请求被重置）、litterbox（BunkerWeb WAF 403）、
+#   imgloc（api.imgse.com DNS 失效）、xinyew / xunjinlu（宝塔 WAF 拦截）；
+#   picui（只输出 webp）、以及更早的 0x0 / tutu / imgur / postimages 等
 assert set(_tpls28) == {
-    "builtin_http", "custom", "catbox", "litterbox", "imglink",
-    "imgloc", "img402", "pngurl",
-    "see", "imgbb", "anyapi", "xinyew", "xunjinlu",
+    "builtin_http", "custom", "imglink", "img402", "pngurl",
+    "anyapi", "see", "imgbb",
 }, \
     f"图床模板应只保留实测可用者，实际 {list(_tpls28)}"
 assert "picui" not in _tpls28, \
@@ -1470,30 +1461,22 @@ for _hk28 in _tpls28:
     assert "Accept" not in _hint28 and "请求头" not in _hint28, \
         f"模板 {_hk28} 的 hint 不应提及请求头（预填进字段即可）"
 _BASE_FIELDS28 = {"enabled", "name", "upload_url", "token", "response"}
-# 只在「需要」的模板上加扩展字段：file_field 仅字段名非 file 或自定义；
-# headers 仅需要额外请求头的模板（自定义 + pngurl 必带 Accept）；
-# form_fields 仅需要额外普通表单字段的模板（自定义 + litterbox 必填 time）
+# 只在「需要」的模板上加扩展字段：file_field 仅字段名非 file；headers 仅
+# 需要额外请求头的模板（自定义 + pngurl 必带 Accept）；form_fields 仅自定义
 _TPL_FIELDS28 = {
     # 内置条目不需要上传接口，自带 host/port/base_url 三项
     "builtin_http": {"enabled", "name", "host", "port", "base_url"},
     "custom": _BASE_FIELDS28 | {"file_field", "headers", "form_fields"},
-    "catbox": _BASE_FIELDS28 | {"file_field"},
-    # litterbox：catbox 的临时分支，同 catbox 的 fileToUpload + reqtype 兼容，
-    # 额外要求 form_fields 里的 time=72h（漏填服务端返回 500）
-    "litterbox": _BASE_FIELDS28 | {"file_field", "form_fields"},
     # imglink：默认 file 字段、无额外请求头与表单字段
     "imglink": _BASE_FIELDS28,
-    "imgloc": _BASE_FIELDS28,
     "img402": _BASE_FIELDS28 | {"file_field"},
     "pngurl": _BASE_FIELDS28 | {"headers"},
     # see：S.EE 用 Authorization 直传 key（不带 Bearer），不走 token 字段，
     # 改用 headers 配 Authorization；文件字段名是 smfile
     "see": _BASE_FIELDS28 - {"token"} | {"file_field", "headers"},
     "imgbb": _BASE_FIELDS28 | {"file_field"},
-    # anyapi / xinyew / xunjinlu：游客免 token，默认 file 字段，无额外请求头
+    # anyapi：游客免 token，默认 file 字段，无额外请求头
     "anyapi": _BASE_FIELDS28,
-    "xinyew": _BASE_FIELDS28,
-    "xunjinlu": _BASE_FIELDS28,
 }
 for _tk28 in _tpls28:
     _ti28 = _tpls28[_tk28]["items"]
@@ -1520,26 +1503,7 @@ assert _tpls28["custom"]["items"]["form_fields"]["default"] == ""
 assert _tpls28["builtin_http"]["items"]["base_url"]["default"] == ""
 assert "玩家" in _tpls28["builtin_http"]["items"]["base_url"]["hint"], \
     "内置服务 base_url 的 hint 必须说明玩家可达性前提"
-assert _tpls28["catbox"]["items"]["upload_url"]["default"] == \
-    "https://catbox.moe/user/api.php"
-assert _tpls28["catbox"]["items"]["response"]["default"] == "text"
-# litterbox（catbox 临时分支）：实测文档常见的 /api/upload.php 已 404，
-# 真实端点是 /resources/internals/api.php；必须预填 fileToUpload + time=72h
-# （litterbox 少 time 字段直接返回 500，实测确认）
-assert _tpls28["litterbox"]["items"]["upload_url"]["default"] == \
-    "https://litterbox.catbox.moe/resources/internals/api.php", \
-    "litterbox 端点必须是实测可用的 /resources/internals/api.php"
-assert "/api/upload.php" not in _tpls28["litterbox"]["items"]["upload_url"]["default"], \
-    "litterbox 的 /api/upload.php 端点已 404，不得预填"
-assert _tpls28["litterbox"]["items"]["response"]["default"] == "text"
-assert _tpls28["litterbox"]["items"]["name"]["default"] == "litterbox"
-assert _tpls28["litterbox"]["items"]["file_field"]["default"] == "fileToUpload", \
-    "litterbox 沿用 catbox 的 fileToUpload 字段名"
-assert _tpls28["litterbox"]["items"]["form_fields"]["default"] == "time: 72h", \
-    "litterbox 必须预填 time=72h（不带该字段服务端返回 500）"
-assert _tpls28["litterbox"]["items"]["token"]["default"] == "", \
-    "litterbox 匿名上传，token 默认应留空"
-# imglink：默认 file 字段、json 响应、匿名
+# 预填校验：接口、响应方式与字段名不同的图床必须带对 file_field
 assert _tpls28["imglink"]["items"]["upload_url"]["default"] == \
     "https://imglink.cc/api/upload"
 assert _tpls28["imglink"]["items"]["response"]["default"] == "json"
@@ -1548,17 +1512,12 @@ assert _tpls28["imglink"]["items"]["token"]["default"] == "", \
     "imglink 匿名上传，token 默认应留空"
 assert "file_field" not in _tpls28["imglink"]["items"], \
     "imglink 用默认 file 字段，无需展示 file_field"
-assert _tpls28["imgloc"]["items"]["upload_url"]["default"] == \
-    "https://api.imgse.com/1/upload"
-assert _tpls28["imgloc"]["items"]["response"]["default"] == "json"
-assert _tpls28["imgloc"]["items"]["name"]["default"] == "imgloc"
-# 预填校验：字段名不同的图床必须带对 file_field
 assert _tpls28["img402"]["items"]["upload_url"]["default"] == \
     "https://img402.dev/api/free"
 assert _tpls28["img402"]["items"]["file_field"]["default"] == "image"
 assert _tpls28["img402"]["items"]["response"]["default"] == "json"
 # pngurl（原 pngcdn.cn 迁移）：接口、json 解析与 Accept 请求头必须预填，
-# 访客上传可用所以 token 留空
+# 访客上传可用所以 token 留空；但访客有频率限制，hint 里必须写明
 assert _tpls28["pngurl"]["items"]["upload_url"]["default"] == \
     "https://pngurl.com/api/v1/upload"
 assert _tpls28["pngurl"]["items"]["response"]["default"] == "json"
@@ -1566,17 +1525,19 @@ assert _tpls28["pngurl"]["items"]["headers"]["default"] == \
     "Accept: application/json", "pngurl 必须预填 Accept 请求头"
 assert _tpls28["pngurl"]["items"]["token"]["default"] == "", \
     "pngurl 访客上传可用，token 默认应留空"
+assert "频率" in _tpls28["pngurl"]["hint"] or "频率" in \
+    _tpls28["pngurl"]["items"]["token"]["hint"], \
+    "pngurl 访客上传有频率限制，hint 必须写明"
 assert "file_field" not in _tpls28["pngurl"]["items"], \
     "pngurl 用默认 file 字段，无需展示 file_field"
 # 不需要额外请求头的模板不应展示 headers 字段
-for _hk28 in ("catbox", "imgloc", "img402", "imgbb", "litterbox", "imglink",
-              "anyapi", "xinyew", "xunjinlu"):
+for _hk28 in ("img402", "imgbb", "imglink", "anyapi"):
     assert "headers" not in _tpls28[_hk28]["items"], \
         f"模板 {_hk28} 不需要额外请求头，不应展示 headers 字段"
-# 不需要额外普通表单字段的模板不应展示 form_fields 字段（litterbox 例外：
-# 它必填 time=72h；自定义模板保留它以便自由接入任意图床）
+# 不需要额外普通表单字段的模板不应展示 form_fields 字段（只有自定义模板
+# 保留它以便自由接入任意图床）
 for _hk28 in _tpls28:
-    if _hk28 in ("custom", "litterbox"):
+    if _hk28 == "custom":
         continue
     assert "form_fields" not in _tpls28[_hk28]["items"], \
         f"模板 {_hk28} 不需要额外表单字段，不应展示 form_fields 字段"
@@ -1600,27 +1561,41 @@ assert _tpls28["imgbb"]["items"]["response"]["default"] == "json"
 assert _tpls28["imgbb"]["items"]["file_field"]["default"] == "image", \
     "imgbb 文件字段名是 image"
 assert _tpls28["imgbb"]["items"]["token"]["default"] == ""
-# picui 模板已移除：前端兜底键列表也要同步去掉，否则模板接口拉取失败时
-# 下拉里又会冒出这个用不了的模板
+# 已移除的模板不得再出现在前端兜底清单里：前端有 app.js 的键数组与
+# index.html 的静态下拉两处兜底，模板接口拉取失败时都靠它们渲染
 _js28 = (_pathlib.Path(__file__).resolve().parent
          / "pages" / "dashboard" / "app.js").read_text(encoding="utf-8")
 _jskeys28 = _js28.split("imageBedTemplateKeys = [")[1].split("];")[0]
-assert "picui" not in _jskeys28, "前端兜底模板键列表不应残留 picui"
-# anyapi / xinyew / xunjinlu：游客免 token，默认 file 字段
+_html28 = (_pathlib.Path(__file__).resolve().parent
+           / "pages" / "dashboard" / "index.html").read_text(encoding="utf-8")
+for _dead28 in ("picui", "catbox", "litterbox", "imgloc",
+                "xinyew", "xunjinlu"):
+    assert _dead28 not in _jskeys28, \
+        f"前端兜底模板键列表不应残留已移除模板 {_dead28}"
+    assert f'value="{_dead28}"' not in _html28, \
+        f"静态模板下拉不应残留已移除模板 {_dead28}"
+# 请求头 / 额外表单字段的存储契约：面板按换行保存（后端 splitlines 解析），
+# 读取时兼容旧版面板写下的 `|` 分隔格式
+assert ".join('\\n')" in _js28, \
+    "面板保存请求头/额外表单字段时应按换行拼接（与后端 splitlines 对齐）"
+assert "/[|\\n]/" in _js28, "读取请求头时应兼容旧版 `|` 分隔格式"
+# 表单字段按当前模板声明显示/收集：S.EE 无 token 字段时不得收集 token
+assert "hasField('token')" in _js28 and \
+    "hasField('form_fields')" in _js28, \
+    "面板应按模板字段集显示/收集图床字段"
+# anyapi：游客免 token，默认 file 字段
 assert _tpls28["anyapi"]["items"]["upload_url"]["default"] == \
     "https://imageproxy.zhongzhuan.chat/api/upload"
-assert _tpls28["xinyew"]["items"]["upload_url"]["default"] == \
-    "https://api.xinyew.cn/api/360tc"
-assert _tpls28["xunjinlu"]["items"]["upload_url"]["default"] == \
-    "https://api.xunjinlu.fun/tc/api.php"
-for _nk28 in ("anyapi", "xinyew", "xunjinlu"):
-    assert _tpls28[_nk28]["items"]["response"]["default"] == "json"
-    assert _tpls28[_nk28]["items"]["token"]["default"] == "", \
-        f"{_nk28} 游客免 token，token 默认应留空"
-    assert "file_field" not in _tpls28[_nk28]["items"], \
-        f"{_nk28} 用默认 file 字段，无需展示 file_field"
+assert _tpls28["anyapi"]["items"]["response"]["default"] == "json"
+assert _tpls28["anyapi"]["items"]["token"]["default"] == "", \
+    "anyapi 游客免 token，token 默认应留空"
+assert "file_field" not in _tpls28["anyapi"]["items"], \
+    "anyapi 用默认 file 字段，无需展示 file_field"
+# imgbb 的 key 走表单字段 key（不是 Bearer），hint 必须说明
+assert "key" in _tpls28["imgbb"]["items"]["token"]["hint"], \
+    "imgbb token hint 应说明以表单字段 key 提交"
 # 新模板 hint 格式：地区词：是否需token，大小限制
-for _hk28 in ("see", "imgbb", "litterbox", "imglink"):
+for _hk28 in ("see", "imgbb", "imglink", "pngurl"):
     _hint28 = _tpls28[_hk28]["hint"]
     assert "：" in _hint28, f"模板 {_hk28} 的 hint 应含冒号分隔地区与说明"
     _region28 = _hint28.split("：")[0]
@@ -1733,6 +1708,10 @@ assert _ph28('{"Authorization": ""}') is None
 assert _ph28("Authorization: \nAccept: application/json") == \
     {"Accept": "application/json"}
 assert _ph28("Authorization: my-key") == {"Authorization": "my-key"}
+# 面板旧版本按 `|` 拼成一行保存，解析必须兼容（新面板改用换行）
+assert _ph28("Accept: application/json|X-Api-Key: abc") == {
+    "Accept": "application/json", "X-Api-Key": "abc"}
+assert _pff28("time: 72h|album: public") == {"time": "72h", "album": "public"}
 _ib28h = _IB28("https://x/u", headers="Accept: application/json")
 assert _ib28h.headers == {"Accept": "application/json"}, _ib28h.headers
 assert _IB28("https://x/u").headers is None, "未配置请求头时为 None"
@@ -1995,8 +1974,10 @@ class _FormCap:
     """捕获 FormData.add_field 调用与顺序的桩（离线不联网）。"""
     def __init__(self):
         self.fields = []
+        self.calls = []  # (键, 值, 关键字参数)：兼顾文件名 / Content-Type 断言
     def add_field(self, key, value, *a, **kw):
         self.fields.append((key, value))
+        self.calls.append((key, value, kw))
 class _RespCap:
     def __init__(self, status, text):
         self.status = status
@@ -2038,6 +2019,17 @@ async def _cap28(up):
     assert isinstance(_data, _FormCap)
     return _data, _hdrs
 
+async def _cap28_bytes(up, raw):
+    """同 _cap28，但上传指定字节（用于核对文件名后缀与 Content-Type）。"""
+    _sess = _SessCap()
+    sys.modules["aiohttp"].ClientSession = lambda timeout=None: _sess
+    sys.modules["aiohttp"].ClientTimeout = lambda total=None: total
+    sys.modules["aiohttp"].FormData = _FormCap
+    _url, _err = await up.upload(raw)
+    assert _url == "https://img.example/x.png", f"桩上传应成功: {_err}"
+    _u, _data, _hdrs = _sess.post_args
+    return _data, _hdrs
+
 # 普通图床：文件字段为 file，不附带 catbox 专有字段，无 token 不发请求头
 _data, _hdrs = asyncio.run(_cap28(_IB28("https://x/u", file_field="file")))
 assert _data.fields[0] == ("file", b"pngbytes"), _data.fields
@@ -2066,6 +2058,36 @@ assert ("time", "72h") in _data.fields, \
 _data, _hdrs = asyncio.run(_cap28(_IB28("https://x/u", token="tk-1")))
 assert _hdrs["Authorization"] == "Bearer tk-1", _hdrs
 assert ("token", "tk-1") in _data.fields, _data.fields
+
+# 文件段必须带真实图片 MIME 与对应后缀：实测 anyapi 会以
+# application/octet-stream 为由拒收，imglink 会校验「内容与扩展名不符」
+from astrbot_plugin_minecraft_queqiao.services.image_bed import (
+    TEST_IMAGE_PNG as _PNG28,
+)
+_data, _ = asyncio.run(_cap28_bytes(_IB28("https://x/u"), _PNG28))
+assert _data.calls[0][1] == _PNG28, "文件字段必须带真实图片字节"
+assert _data.calls[0][2].get("content_type") == "image/png", _data.calls[0][2]
+assert str(_data.calls[0][2].get("filename", "")).endswith(".png"), \
+    _data.calls[0][2]
+_DATA_WEBP28 = b"RIFF\x00\x00\x00\x00WEBP\x00\x00\x00\x00"
+_data, _ = asyncio.run(_cap28_bytes(_IB28("https://x/u"), _DATA_WEBP28))
+assert _data.calls[0][2].get("content_type") == "image/webp", _data.calls[0][2]
+assert str(_data.calls[0][2].get("filename", "")).endswith(".webp"), \
+    "webp 字节必须用 .webp 后缀，否则 imglink 会报「内容与扩展名不符」"
+# 识别不出格式时回落后缀与 MIME（不能变成空后缀或 .bin）
+_data, _ = asyncio.run(_cap28_bytes(_IB28("https://x/u"), b"pngbytes"))
+assert str(_data.calls[0][2].get("filename", "")).endswith(".png"), \
+    _data.calls[0][2]
+assert _data.calls[0][2].get("content_type") == "application/octet-stream", \
+    _data.calls[0][2]
+
+# imgbb：token 以表单字段 key 提交，不发 Bearer（imgbb 不认这种鉴权）
+_data, _hdrs = asyncio.run(_cap28(_IB28(
+    "https://api.imgbb.com/1/upload", token="k-1",
+    file_field="image", response="text")))
+assert ("key", "k-1") in _data.fields, _data.fields
+assert ("token", "k-1") not in _data.fields, _data.fields
+assert not _hdrs or "Authorization" not in _hdrs, _hdrs
 
 # headers 与 token 可共存，且互不覆盖
 _data, _hdrs = asyncio.run(_cap28(
@@ -5057,29 +5079,29 @@ assert all(not it["active"] and it["reason"] == "总开关未开启"
 _plugin29.config["enable_image_upload"] = True
 
 # (b2) 模板清单：/image_bed/templates 返回各模板 name/hint/defaults，
-# 与后端 _new_image_entry 生成的新条目默认值同源（catbox 的 file_field 应
-# 为 fileToUpload、upload_url 为官方接口；builtin_http 的 host/port 默认）
+# 与后端 _new_image_entry 生成的新条目默认值同源（img402 的 file_field 应为
+# image、upload_url 为官方接口；builtin_http 的 host/port 默认）
 _res29t = asyncio.run(_wac29.get_image_bed_templates())
 _tpl29 = _res29t["data"]
-for _need29t in ("builtin_http", "custom", "catbox"):
+for _need29t in ("builtin_http", "custom", "img402"):
     assert _need29t in _tpl29, f"模板清单缺少 {_need29t}"
 assert _tpl29["builtin_http"]["defaults"]["host"] == "0.0.0.0" and \
     _tpl29["builtin_http"]["defaults"]["port"] == 8765, _tpl29["builtin_http"]
-assert _tpl29["catbox"]["defaults"]["file_field"] == "fileToUpload", \
-    "catbox 模板默认 file_field 应为 fileToUpload"
-assert _tpl29["catbox"]["defaults"]["upload_url"] == "https://catbox.moe/user/api.php", \
-    "catbox 模板默认 upload_url 应为官方接口"
+assert _tpl29["img402"]["defaults"]["file_field"] == "image", \
+    "img402 模板默认 file_field 应为 image"
+assert _tpl29["img402"]["defaults"]["upload_url"] == "https://img402.dev/api/free", \
+    "img402 模板默认 upload_url 应为官方接口"
 
 # (c) 新建：默认值取自 schema 模板，且不得触碰 mc_servers
 _orig_json29 = _wa29.request.json
 async def _fake_json29(default=None):
-    return {"template_key": "catbox", "name": "猫盒"}
+    return {"template_key": "img402", "name": "猫盒"}
 _wa29.request.json = _fake_json29
 _res29c = asyncio.run(_wac29.create_config_image_bed())
 assert _res29c["data"]["saved"] is True
-assert _plugin29.config["image_upload_services"][3]["__template_key"] == "catbox"
-assert _plugin29.config["image_upload_services"][3]["file_field"] == "fileToUpload", \
-    "catbox 模板默认值应取自 schema（file_field=fileToUpload）"
+assert _plugin29.config["image_upload_services"][3]["__template_key"] == "img402"
+assert _plugin29.config["image_upload_services"][3]["file_field"] == "image", \
+    "img402 模板默认值应取自 schema（file_field=image）"
 assert _plugin29.reloads == 0 and _plugin29.image_bed_applys == 1, \
     "图床保存必须走 apply_image_bed_config（免重连），不得 reload_config"
 assert _plugin29.config["mc_servers"] == _mc_before29, "图床 CRUD 不得触碰 mc_servers"
@@ -5127,8 +5149,8 @@ for _k29, _spec29 in _tpl_items29.items():
     assert _k29 in _e29, f"新建条目缺少模板字段 {_k29}"
     assert _e29[_k29] == _sd43(_spec29), \
         f"字段 {_k29} 默认值须与 schema 一致"
-_e29c = _wac29._new_image_entry("catbox")
-assert _e29c["file_field"] == "fileToUpload" and _e29c["response"] == "text"
+_e29c = _wac29._new_image_entry("img402")
+assert _e29c["file_field"] == "image" and _e29c["response"] == "json"
 assert _wac29._new_image_entry("ghost")["__template_key"] == "custom", \
     "未知模板应回落 custom"
 

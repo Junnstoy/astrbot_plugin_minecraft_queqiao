@@ -72,8 +72,8 @@ The dashboard has a dedicated “🖼️ 图床” (Image Bed) tab pinned at the
 
 - **Master switch & timeout**: the root-level `enable_image_upload` (when off, no upload is attempted) and `image_upload_timeout` (upload timeout in seconds) are toggled / edited at the top of the panel and take effect on save
 - **Full entry management**: each entry is a card showing its kind (built-in / third-party), enabled state, why it is (or is not) active (disabled entry / invalid URL / wrong response type are all spelled out), address and runtime state; “new” entries are created with the template defaults filled in, editing covers every field, and deletion asks for confirmation
-- **Built-in HTTP service runtime**: `builtin_http` entries show a “running / not running” badge reflecting the real state (not started / stopped / failed to start)
 - **Reorder entries**: the “⬆ 上移 / ⬇ 下移” (move up / move down) buttons on each card set the order in which image beds are tried; uploads walk the list from top to bottom, so the higher an entry sits the earlier it is tried, and the new order takes effect as soon as you save
+- **Built-in HTTP service runtime**: `builtin_http` entries show a “running / not running” badge reflecting the real state (not started / stopped / failed to start)
 - **🧪 Test upload**: with no parameters at all, a built-in PNG probe is pushed through the whole upload chain per entry and the hosted image is read back to verify its real format, with the result colour-coded — 🟢 **green = pass** (the produced format can be rendered by ChatImage), 🟡 **yellow = usable but limited** (the image bed re-encodes images to webp, which ChatImage cannot render, so the upload succeeds but nothing shows in game) and 🔴 **red = failed** (listed as “image-bed name: reason”) — configuration problems are identified in one click
 
 Every save is **partial-effect** (only the image-transfer subsystem is rebuilt; no MC connection is touched). The image-transfer subsystem is also decoupled from the MC server config, so the image bed starts even when no server is configured at all.
@@ -198,7 +198,7 @@ Automatically upload images without a public URL to an image bed to get a public
 
 1. Turn on the root-level switch `enable_image_upload`
 2. Adjust `image_upload_timeout` (upload timeout, default 30 s) as needed
-3. Add image bed entries in `image_upload_services`: no bed is loaded by default — the **"Custom"** template at the top accepts any upload endpoint, the rest are pre-configured templates (endpoint and response mode pre-filled, just supply a token where needed)
+3. Add image bed entries in `image_upload_services`: no bed is loaded by default — “new” lets you pick the **built-in HTTP service**, the **“Custom”** template (any upload endpoint), or a pre-configured template (endpoint and response mode pre-filled, just supply a token where needed)
 
 > 💡 All three steps above can be done in the dashboard's “🖼️ 图床” panel: the master switch and timeout live at the top, entries are created / edited from templates with “new / edit”, and “🧪 Test upload” verifies the configuration right away.
 
@@ -207,9 +207,9 @@ Automatically upload images without a public URL to an image bed to get a public
 | `enabled` | bool | `true` | Enable this image bed entry |
 | `name` | string | empty | Display name (logs/labels only) |
 | `upload_url` | string | empty | **Full upload endpoint URL (not the site homepage)** |
-| `token` | string | empty | API token (sent as `Authorization: Bearer <token>` header plus a `token` form field); leave empty for token-free beds |
+| `token` | string | empty | API token (sent as `Authorization: Bearer <token>` header plus a `token` form field; imgbb is the exception and receives it as the `key` form field); leave empty for token-free beds |
 | `response` | string | `text` | Response parsing: `text` = the response body is the link; `json` = the `url` field (falling back to the first `http(s)://` field) |
-| `file_field` | string | `file` | Multipart file field name (a few beds use `image`, `fileToUpload`, etc.) |
+| `file_field` | string | `file` | Multipart file field name (`image` for img402 / imgbb, `smfile` for S.EE) |
 | `headers` | string | empty | Custom request headers: one `Name: Value` per line (or a JSON object) |
 | `form_fields` | string | empty | Extra plain form fields: one `Name: Value` per line (or a JSON object) |
 
@@ -220,21 +220,17 @@ Pre-configured templates:
 
 | Template | Region | Token | Response | Size / quota | Notes |
 |----------|--------|-------|----------|--------------|-------|
-| `catbox` | overseas | no | `text` | ≤200MB per image | anonymous direct upload |
-| `litterbox` | overseas | no | `text` | ≤1GB per image | catbox's temporary branch; images expire automatically (`form_fields` pre-filled with `time: 72h`) |
-| `imglink` | overseas | no | `json` | ≤25MB per image | anonymous direct upload; the server re-encodes images |
-| `img402.dev` | overseas | no | `json` | ≤10MB per image | file field is `image`; ≤1MB stored permanently, 1–10MB for 30 days |
-| `pngurl` | domestic | no | `json` | — | successor of pngcdn.cn |
+| `imglink` | overseas | no | `json` | ≤25MB per image | anonymous direct upload; the server re-encodes images and can be slow |
+| `img402.dev` | overseas | no | `json` | ≤10MB per image | file field is `image`; ≤1MB stored permanently, 1–10MB for 30 days; behind Cloudflare, occasional timeouts |
+| `pngurl` | domestic | no | `json` | — | successor of pngcdn.cn; guest uploads are rate-limited, register and supply a token for regular use |
 | `anyapi` | domestic relay | no | `json` | suggested ≤10MB per file | anyapi relay proxy |
-| `xinyew` | domestic | no | `json` | — | 360 image bed |
-| `xunjinlu` | domestic | no | `json` | — | multi-endpoint aggregator that picks an upstream by file size |
-| `imgloc` | domestic | yes | `json` | ~6MB per image | 路过图床; register for a token |
-| `see` | domestic | yes | `json` | ≤5MB per image | S.EE / sm.ms; file field is `smfile` |
-| `imgbb` | overseas | yes | `json` | ≤32MB per image | established API; file field is `image` |
+| `see` | domestic | yes | `json` | ≤5MB per image | S.EE / sm.ms; file field is `smfile`, put the key in the request header |
+| `imgbb` | overseas | yes | `json` | ≤32MB per image | established API; file field is `image`, key submitted as the `key` form field |
 
 </details>
 
-- No `picui` template: it re-encodes every image to webp, which ChatImage cannot display; use the `custom` template and fill in the endpoint yourself if you still need one
+- Only templates verified to work are kept: `catbox` / `litterbox` (requests blocked), `imgloc` (endpoint domain gone), `xinyew` / `xunjinlu` (blocked by a WAF) and `picui` (outputs webp only, which the game cannot display) were removed; if you still need them, use the `custom` template and fill in the endpoint yourself
+- Uploads send the image's **real format** in the MIME type and filename suffix (png / jpg / webp …) so image beds do not reject it as a generic file
 - Multiple enabled entries are **tried in list order** (use the “⬆ 上移 / ⬇ 下移” buttons in the panel to change which one comes first); the first success is broadcast into the game; when all fail, a warning aggregates each failure as `name: reason`
 - ⚠️ **Privacy notice**: group images are uploaded to the image bed — enable only when needed
 - ⚠️ **webp images may not show up**: rendering in game depends on ChatImage, which only supports png / jpg / jpeg / jfif / gif / ico / bmp and **does not support webp**. Images in chat are mostly png / jpg, but some image beds re-encode everything they host to webp; when the resulting link is webp the chat bar shows no picture (only the code text). “🧪 Test upload” sends a single PNG and reads the hosted image back to check its format: png / jpg and friends turn it green, while a product that became webp turns it yellow. A yellow result means the image bed re-encodes images to webp — switch to one that stores images as-is (such as `pngurl` or `img402.dev`)
