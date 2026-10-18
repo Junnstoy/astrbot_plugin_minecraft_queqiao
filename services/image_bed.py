@@ -29,6 +29,7 @@
 总开关在根级配置 `enable_image_upload`；条目自身的 `enabled` 可单独关闭。
 """
 
+import base64
 import json
 import uuid
 from urllib.parse import urlparse
@@ -36,12 +37,13 @@ from urllib.parse import urlparse
 from astrbot.api import logger
 
 from ..core.constants import (
+    CHATIMAGE_SUPPORTED_FORMATS,
     DEFAULT_IMAGE_HTTP_HOST,
     DEFAULT_IMAGE_HTTP_PORT,
     DEFAULT_IMAGE_UPLOAD_TIMEOUT,
     PLUGIN_NAME,
 )
-from .image_host import ImageHost
+from .image_host import ImageHost, sniff_image_format
 
 # 第三方图床单次上传超时（秒）的默认值；实际取值由根级配置
 # `image_upload_timeout` 决定，构造条目时注入
@@ -50,9 +52,78 @@ UPLOAD_TIMEOUT = DEFAULT_IMAGE_UPLOAD_TIMEOUT
 # response 支持的可取值
 VALID_RESPONSE_KINDS = ("text", "json")
 
+# ---- 图床检测探针图 ----
+# 只发一张 PNG：群图片最常见就是 PNG/JPEG 这类入参，用它判定上传链能否走通；
+# 产物格式则靠回读字节嗅探——图床若自行转成 webp，ChatImage 显示不出来。
+# 1×1 透明图，体积极小，不占图床额度也不泄露任何内容。
+TEST_IMAGE_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+    "AAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+
+# 产物 URL 扩展名 → 格式短名（没有扩展名或扩展名不认识时返回空串）
+_URL_EXT_FORMATS = {
+    "png": "png",
+    "jpg": "jpeg",
+    "jpeg": "jpeg",
+    "jpe": "jpeg",
+    "jfif": "jfif",
+    "gif": "gif",
+    "ico": "ico",
+    "bmp": "bmp",
+    "webp": "webp",
+    "avif": "avif",
+}
+
 
 def _short(text: str, limit: int = 200) -> str:
     return text if len(text) <= limit else text[:limit] + "..."
+
+
+def format_from_url(url: str) -> str:
+    """从图片 URL 路径的扩展名推断格式短名；推断不出返回空串。
+
+    仅作为回读失败时的兜底：图床 CDN 地址常带 `.png` / `.webp` 后缀，
+    但很多地址（含内置 HTTP 服务的 `/img/<token>`）根本没有扩展名。
+    """
+    path = (url or "").split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+    return _URL_EXT_FORMATS.get(ext, "")
+
+
+def is_chatimage_compatible(fmt: str) -> bool:
+    """该格式能否被 ChatImage 渲染（未知格式一律按兼容处理，避免误报）。"""
+    if not fmt:
+        return True
+    return fmt in CHATIMAGE_SUPPORTED_FORMATS
+
+
+async def inspect_served_image(url: str, timeout: int) -> tuple[str, str]:
+    """回读图床产物，返回 `(格式短名, 备注)`；判断依据优先级为魔数 > 扩展名。
+
+    产物格式只有回读字节才准：图床可能转码（webp → png），也可能把 webp
+    原样存成 `.png` 后缀。aiohttp 缺失或回读失败时退回扩展名推断，并给出
+    备注说明「未能回读」，让用户知道这一条是怎么判出来的。
+    """
+    fallback = format_from_url(url)
+    try:
+        import aiohttp  # AstrBot 运行时既有依赖，惰性导入
+
+    except ImportError:
+        return fallback, "未能回读产物格式（aiohttp 不可用）"
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=max(1, timeout))
+        ) as session:
+            async with session.get(url) as resp:
+                if resp.status >= 400:
+                    return fallback, f"未能回读产物格式（HTTP {resp.status}）"
+                # 只读前 32 字节足够覆盖所有图片魔数，不必下载整张图
+                head = await resp.content.read(32)
+    except Exception as exc:  # 回读只影响分级精度，不能让它中断整轮检测
+        return fallback, f"未能回读产物格式（{type(exc).__name__}）"
+    fmt = sniff_image_format(head)
+    return fmt or fallback, "" if fmt else "未能回读产物格式（未知图片格式）"
 
 
 def _parse_key_value_lines(raw: str) -> dict | None:

@@ -24,19 +24,48 @@ from astrbot.api import logger
 from ..core.constants import IMAGE_HOST_MAX_IMAGES, IMAGE_HOST_TTL, PLUGIN_NAME
 
 
+def sniff_image_format(data: bytes) -> str:
+    """按文件魔数判断图片格式短名（png/jpeg/gif/webp/bmp/ico/avif）。
+
+    与 `guess_image_content_type` 的区别：这里返回的是格式短名而不是 MIME——
+    图床检测要拿它对照 ChatImage 的支持清单（`core/constants.py` 的
+    `CHATIMAGE_SUPPORTED_FORMATS`），MIME 再映射一层反而容易写错。
+    无法识别时返回空串（不是图片，或格式未知）。
+    """
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if data.startswith(b"RIFF") and len(data) >= 12:
+        # RIFF 容器里 WEBP 与 AVIF 共用同一个魔数位置，靠 8..12 字节区分
+        if data[8:12] == b"WEBP":
+            return "webp"
+        if data[8:12] == b"AVIF":
+            return "avif"
+    if data.startswith(b"\x00\x00\x01\x00"):
+        return "ico"
+    if data.startswith(b"BM"):
+        return "bmp"
+    return ""
+
+
+# 格式短名 → MIME（供 HTTP 响应头使用）
+_FORMAT_MIME = {
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "bmp": "image/bmp",
+    "ico": "image/x-icon",
+    "avif": "image/avif",
+}
+
+
 def guess_image_content_type(data: bytes) -> str:
     """按文件魔数猜测图片 MIME，供 HTTP 响应使用；无法识别回退 octet-stream。"""
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data.startswith((b"GIF87a", b"GIF89a")):
-        return "image/gif"
-    if data.startswith(b"RIFF") and len(data) >= 12 and data[8:12] == b"WEBP":
-        return "image/webp"
-    if data.startswith(b"BM"):
-        return "image/bmp"
-    return "application/octet-stream"
+    return _FORMAT_MIME.get(sniff_image_format(data), "application/octet-stream")
 
 
 class ImageHost:

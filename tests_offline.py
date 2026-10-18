@@ -5149,8 +5149,13 @@ _wa29.request.json = _fake_json29l
 assert asyncio.run(_wac29.switch_image_bed())["status_code"] == 400
 _wa29.request.json = _orig_json29
 
-# (h) test：全量逐条结果透传 {ok, url, failures[], results[]}——每条目单独
-# 实测并返回 名称/可用/URL或原因/耗时(ms)/生效态，未生效条目只报原因不耗时。
+# (h) test：全量逐条结果透传 {ok, level, url, counts, failures[], warnings[],
+# results[]}——每条目只发一次 PNG 探针，再按回读到的产物格式分
+# 绿(ok)/黄(warn)/红(fail) 三档；未生效条目只报原因不耗时。
+# 产物格式回读走 HTTP，离线自检替换成桩（不得真发请求）
+async def _fake_inspect29(url):
+    return "png", ""
+_wac29._inspect_served_image = _fake_inspect29
 # (c)(d)(e) CRUD 与 (g) switch 已改动列表并关过总开关，此处显式重置
 class _FakeUploader29:
     def __init__(self, name, result=("https://img.example/ok.png", "")):
@@ -5177,24 +5182,30 @@ _imagebed29.uploaders = [
 _res29h = asyncio.run(_wac29.test_image_bed_upload())
 assert _res29h["data"]["ok"] is True, _res29h["data"]
 assert _res29h["data"]["url"] == "https://img.example/ok.png", _res29h["data"]
-assert _res29h["data"]["failures"] == [
-    "catbox: HTTP 403", "坏条目: upload_url 需为 http(s):// 开头"], \
-    _res29h["data"]["failures"]
+assert _res29h["data"]["failures"] == ["catbox: HTTP 403"], \
+    _res29h["data"]["failures"]  # 未生效条目只进 inactive 计数，不进 failures
+assert _res29h["data"]["level"] == "ok", _res29h["data"]
+assert _res29h["data"]["counts"] == {"ok": 1, "warn": 0, "fail": 1, "inactive": 1}, \
+    _res29h["data"]["counts"]
+assert _res29h["data"]["warnings"] == [], _res29h["data"]
 _res29h_results = _res29h["data"]["results"]
 assert len(_res29h_results) == 3, _res29h_results
 assert _res29h_results[0] == {
-    "name": "本机", "ok": True, "url": "https://img.example/ok.png",
+    "name": "本机", "ok": True, "level": "ok", "url": "https://img.example/ok.png",
     "elapsed_ms": _res29h_results[0]["elapsed_ms"], "reason": "", "active": True,
+    "format": "png", "note": "",
 }
 assert isinstance(_res29h_results[0]["elapsed_ms"], int) and \
     _res29h_results[0]["elapsed_ms"] >= 0, "耗时应为非负整数毫秒"
 assert _res29h_results[1] == {
-    "name": "catbox", "ok": False, "url": "",
-    "elapsed_ms": _res29h_results[1]["elapsed_ms"], "reason": "HTTP 403", "active": True,
+    "name": "catbox", "ok": False, "level": "fail", "url": "",
+    "elapsed_ms": _res29h_results[1]["elapsed_ms"], "reason": "HTTP 403",
+    "active": True, "format": "", "note": "",
 }
 assert _res29h_results[2] == {
-    "name": "坏条目", "ok": False, "url": "",
+    "name": "坏条目", "ok": False, "level": "fail", "url": "",
     "elapsed_ms": 0, "reason": "upload_url 需为 http(s):// 开头", "active": False,
+    "format": "", "note": "",
 }
 # 全部失败场景：ok=false 且 failures 汇总每条
 _imagebed29.uploaders = [
@@ -5203,9 +5214,11 @@ _imagebed29.uploaders = [
 ]
 _res29h2 = asyncio.run(_wac29.test_image_bed_upload())
 assert _res29h2["data"]["ok"] is False, _res29h2["data"]
-assert _res29h2["data"]["failures"] == [
-    "本机: 超时", "catbox: HTTP 500", "坏条目: upload_url 需为 http(s):// 开头"], \
+assert _res29h2["data"]["failures"] == ["本机: 超时", "catbox: HTTP 500"], \
     _res29h2["data"]["failures"]
+assert _res29h2["data"]["level"] == "fail", _res29h2["data"]
+assert _res29h2["data"]["counts"] == {"ok": 0, "warn": 0, "fail": 2, "inactive": 1}, \
+    _res29h2["data"]
 
 # (h2) 单条目测试：index 生效 → 复用运行时实例（uploaders[k]）走真实链路；
 # index 未生效 → 直接返回未生效原因；index 越界/非整数 → 400。
@@ -5239,9 +5252,12 @@ async def _fake_json29n(default=None):
     return {"index": 2}  # 坏条目：upload_url 非法，未进入运行链路
 _wa29.request.json = _fake_json29n
 _res29n = asyncio.run(_wac29.test_image_bed_upload())
-assert _res29n["data"]["ok"] is False and \
-    _res29n["data"]["failures"] == ["坏条目: upload_url 需为 http(s):// 开头"], \
+assert _res29n["data"]["ok"] is False and _res29n["data"]["failures"] == [], \
     _res29n["data"]["failures"]
+assert _res29n["data"]["counts"] == {"ok": 0, "warn": 0, "fail": 0, "inactive": 1}, \
+    _res29n["data"]["counts"]
+assert _res29n["data"]["results"][0]["active"] is False and \
+    "upload_url" in _res29n["data"]["results"][0]["reason"], _res29n["data"]
 async def _fake_json29o(default=None):
     return {"index": 99}
 _wa29.request.json = _fake_json29o
@@ -6153,3 +6169,207 @@ assert "notify_on_connect_fail" not in _items51["message"]["items"], \
     "连接失败通知应落在模板项顶层，message 子对象内不得重复"
 print("OK  默认关闭 / 模板渲染防异常 / 连接回调逐会话发送 / 失败隔离 / "
       "同一轮故障只通知首次失败 / 软更新即时生效 / schema 同步")
+
+print("\n=== 52. 图床检测三色分级（PNG 探针 + 产物格式嗅探） ===")
+import pathlib as _pl52
+import tempfile as _tf52
+from astrbot_plugin_minecraft_queqiao.core.constants import (
+    CHATIMAGE_SUPPORTED_FORMATS as _CIF52,
+)
+from astrbot_plugin_minecraft_queqiao.services.image_host import (
+    sniff_image_format as _sniff52,
+    guess_image_content_type as _ctype52,
+)
+from astrbot_plugin_minecraft_queqiao.services import image_bed as _ibmod52
+from astrbot_plugin_minecraft_queqiao.services.image_bed import (
+    TEST_IMAGE_PNG as _PNG52,
+    format_from_url as _fmturl52,
+    is_chatimage_compatible as _compat52,
+)
+
+# (a) 探针就是真正发出去的那张图：必须是 PNG；webp 探针已移除（灌进去的是
+# webp 就说明测的不是真实链路）
+assert _sniff52(_PNG52) == "png", "PNG 探针图魔数不对"
+assert _ctype52(_PNG52) == "image/png"
+assert not hasattr(_ibmod52, "TEST_IMAGE_WEBP"), \
+    "检测只发一张 PNG，不应再保留 webp 探针"
+
+# (b) 魔数嗅探：一张图是什么格式只认字节，不认后缀（图床常把图存成 .png 却
+# 返回 webp 字节，也会把 PNG 转成 webp 后用 .webp 后缀）
+assert _sniff52(b"\xff\xd8\xff\xe0" + b"\x00" * 8) == "jpeg"
+assert _sniff52(b"GIF89a" + b"\x00" * 8) == "gif"
+assert _sniff52(b"BM" + b"\x00" * 10) == "bmp"
+assert _sniff52(b"\x00\x00\x01\x00" + b"\x00" * 8) == "ico"
+assert _sniff52(b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 8) == "webp"
+assert _sniff52(b"RIFF\x00\x00\x00\x00AVIF" + b"\x00" * 8) == "avif"
+assert _sniff52(b"not-an-image") == "", "无法识别的字节必须返回空串"
+assert _ctype52(b"not-an-image") == "application/octet-stream"
+
+# (c) URL 扩展名兜底：回读失败时靠它判断，忽略 query/fragment
+assert _fmturl52("https://x/a.webp") == "webp"
+assert _fmturl52("https://x/a.PNG?t=1") == "png"
+assert _fmturl52("https://x/a.jpg") == "jpeg"
+assert _fmturl52("https://x/a.jpeg#f") == "jpeg"
+assert _fmturl52("https://x/img/ABCDEF") == "", "无扩展名（内置 HTTP 服务）必须返回空串"
+assert _fmturl52("https://x/a/") == ""
+
+# (d) ChatImage 支持清单：官方只认 png/jpg/jpeg/jfif/gif/ico/bmp
+for _f52 in ("png", "jpeg", "jfif", "gif", "ico", "bmp"):
+    assert _f52 in _CIF52, f"ChatImage 支持格式清单缺少 {_f52}"
+assert "webp" not in _CIF52 and "avif" not in _CIF52, "webp/avif 不在 ChatImage 支持清单内"
+assert _compat52("png") and _compat52("gif") and _compat52("bmp")
+assert not _compat52("webp") and not _compat52("avif")
+assert _compat52(""), "格式未知时不得判为不兼容（避免误报黄灯）"
+
+# (e) 三档结论端到端：同一份条目列表里同时出现 绿/黄/红
+_tmp52 = _pl52.Path(_tf52.mkdtemp(prefix="queqiao_ibed52_"))
+_conf52 = {
+    "enable_image_upload": True,
+    "image_upload_timeout": 30,
+    "mc_servers": [],
+    "image_upload_services": [
+        {"__template_key": "custom", "enabled": True, "name": "原样",
+         "upload_url": "https://a.example/u", "response": "text"},
+        {"__template_key": "custom", "enabled": True, "name": "转webp",
+         "upload_url": "https://b.example/u", "response": "text"},
+        {"__template_key": "custom", "enabled": True, "name": "无后缀",
+         "upload_url": "https://c.example/u", "response": "text"},
+        {"__template_key": "custom", "enabled": True, "name": "宕机",
+         "upload_url": "https://d.example/u", "response": "text"},
+    ],
+}
+
+class _Up52:
+    """按 mode 模拟四类图床：原样存 PNG / 转成 webp / 无扩展名产物 / 宕机。"""
+
+    def __init__(self, mode):
+        self.mode = mode
+        self.seen = []
+
+    async def upload(self, data):
+        self.seen.append(data[:4])
+        if self.mode == "ok":
+            return "https://img.example/ok.png", ""
+        if self.mode == "webp":
+            return "https://img.example/a.webp", ""
+        if self.mode == "noext":
+            return "https://img.example/nox", ""
+        return None, "HTTP 500"
+
+async def _fake_inspect52(url):
+    """产物格式回读桩：按 URL 给格式（离线自检不得真发 HTTP）。"""
+    if url.endswith(".webp"):
+        return "webp", ""
+    if url.endswith(".png"):
+        return "png", ""
+    return "", "未能回读产物格式（未知图片格式）"
+
+_plugin52 = _FakePlugin29(_conf52, str(_tmp52))
+_imagebed52 = _FakeImageBed29(uploaders=("原样", "转webp", "无后缀", "宕机"))
+_imagebed52.uploaders = [_Up52("ok"), _Up52("webp"), _Up52("noext"), _Up52("down")]
+_wac52 = _WAC29(
+    _Ctx29(), _SM29(), None, _imagebed52, None,
+    {}, None, None, None, _plugin52,
+)
+_wac52._inspect_served_image = _fake_inspect52
+_data52 = asyncio.run(_wac52.test_image_bed_upload())["data"]
+assert _data52["counts"] == {"ok": 2, "warn": 1, "fail": 1, "inactive": 0}, _data52["counts"]
+assert _data52["level"] == "ok" and _data52["ok"] is True, _data52
+_rows52 = {r["name"]: r for r in _data52["results"]}
+# 绿：产物是 PNG，ChatImage 能显示
+assert _rows52["原样"]["level"] == "ok" and _rows52["原样"]["ok"] is True
+assert _rows52["原样"]["format"] == "png" and _rows52["原样"]["reason"] == ""
+# 黄：图床把 PNG 转成了 webp → 传得上去，但游戏里显示不出来
+assert _rows52["转webp"]["level"] == "warn" and _rows52["转webp"]["ok"] is True
+assert _rows52["转webp"]["url"] == "https://img.example/a.webp", _rows52["转webp"]
+assert _rows52["转webp"]["format"] == "webp"
+_reason52 = _rows52["转webp"]["reason"]
+assert "传入的是 PNG" in _reason52 and "输出为 webp" in _reason52, _reason52
+assert "ChatImage 不支持 webp" in _reason52 and "显示不出来" in _reason52, _reason52
+# 绿：产物无扩展名、回读不到格式 → 按「未知即兼容」处理，不误报黄灯
+assert _rows52["无后缀"]["level"] == "ok" and _rows52["无后缀"]["ok"] is True
+assert _rows52["无后缀"]["format"] == ""
+assert "未能回读" in _rows52["无后缀"]["note"], _rows52["无后缀"]
+# 红：上传直接失败
+assert _rows52["宕机"]["level"] == "fail" and _rows52["宕机"]["ok"] is False
+assert _rows52["宕机"]["format"] == ""
+assert _data52["failures"] == ["宕机: HTTP 500"], _data52["failures"]
+assert len(_data52["warnings"]) == 1 and "转webp: " in _data52["warnings"][0], \
+    _data52["warnings"]
+
+# 每条目只上传一次，且发出去的确实是 PNG 探针字节
+for _u52 in _imagebed52.uploaders:
+    assert _u52.seen == [b"\x89PNG"], f"每条目应只发一次 PNG 探针，实际 {_u52.seen}"
+
+# 汇总额外口径：未启用/未生效条目单独计入 inactive，不得混进「不可用」
+_plugin52.config["image_upload_services"][3]["enabled"] = False  # 「宕机」关掉
+_data52_off = asyncio.run(_wac52.test_image_bed_upload())["data"]
+assert _data52_off["counts"] == {"ok": 2, "warn": 1, "fail": 0, "inactive": 1}, \
+    _data52_off["counts"]
+assert _data52_off["failures"] == [], "未启用条目不得进 failures"
+assert _data52_off["results"][3]["active"] is False
+_plugin52.config["image_upload_services"][3]["enabled"] = True
+
+# 单条目（index）路径必须给出同构的结论：黄灯条目 ok=True 但 level=warn
+async def _fake_json52(default=None):
+    return {"index": 1}
+_wa52mod = __import__(
+    "astrbot_plugin_minecraft_queqiao.services.web_api", fromlist=["*"]
+)
+_orig_json52 = _wa52mod.request.json
+_wa52mod.request.json = _fake_json52
+try:
+    _one52 = asyncio.run(_wac52.test_image_bed_upload())["data"]
+finally:
+    _wa52mod.request.json = _orig_json52
+assert _one52["level"] == "warn" and _one52["ok"] is True, _one52
+assert _one52["counts"] == {"ok": 0, "warn": 1, "fail": 0, "inactive": 0}, _one52["counts"]
+assert _one52["results"][0]["name"] == "转webp"
+assert _one52["results"][0]["level"] == "warn"
+
+# (f) 前端三色渲染：状态文案/CSS 类/汇总计数必须齐活
+_dash52 = _pl52.Path(__file__).with_name("pages") / "dashboard"
+_js52 = (_dash52 / "app.js").read_text(encoding="utf-8")
+_css52 = (_dash52 / "style.css").read_text(encoding="utf-8")
+_html52 = (_dash52 / "index.html").read_text(encoding="utf-8")
+assert "_testRowLevel" in _js52, "前端缺少档位归一方法（旧响应 ok 兜底）"
+assert "row-${level}" in _js52, "状态徽章未按档位着色"
+assert "产物受限" in _js52, "状态文案缺少「产物受限」"
+assert "webp 受限" not in _js52, "旧文案「webp 受限」应已改为产物口径"
+assert "ib-item-test-result ${level}" in _js52, "条目结果容器未按档位着色"
+assert "counts.warn" in _js52, "全量测试汇总未统计黄灯"
+assert "ib-test-result warn" in _js52, "全量汇总容器未支持黄灯样式"
+for _c52 in (".ib-test-result.warn", ".ib-item-test-result.warn",
+             ".ib-test-row-status.row-warn"):
+    assert _c52 in _css52, f"CSS 缺少黄灯样式 {_c52}"
+assert "--mc-yellow" in _css52, "黄灯样式必须走主题的 mc-yellow 变量"
+assert "黄=图床把图片转成了 webp" in _html52, \
+    "「🧪 测试上传」按钮提示未说明三色含义"
+
+# (g) README 双向同步：中文权威版写清 webp 限制与三色，英文版跟随
+_readme52 = _pl52.Path(__file__).with_name("README.md").read_text(encoding="utf-8")
+_readme_en52 = _pl52.Path(__file__).with_name("README_en.md").read_text(encoding="utf-8")
+assert "webp" in _readme52.lower(), "README 未说明 ChatImage 不支持 webp"
+assert "绿" in _readme52 and "黄" in _readme52 and "红" in _readme52, \
+    "README 未说明图床检测三色含义"
+assert "只传一张 PNG" in _readme52, "README 未说明检测只发 PNG 探针"
+assert "webp" in _readme_en52.lower() and "yellow" in _readme_en52.lower(), \
+    "README_en 未同步 webp 限制与三色说明"
+
+# (h) 版本号五处同步：metadata / register / 两份 README 徽章 / CHANGELOG 标题
+_ver52 = next(
+    line.split(":", 1)[1].strip()
+    for line in _pl52.Path(__file__).with_name("metadata.yaml")
+    .read_text(encoding="utf-8").splitlines()
+    if line.startswith("version:")
+)
+assert f'"{_ver52}"' in _pl52.Path(__file__).with_name("main.py").read_text(encoding="utf-8"), \
+    f"main.py register() 版本号未与 metadata 同步（{_ver52}）"
+assert f"version-{_ver52}" in _readme52 and f"version-{_ver52}" in _readme_en52, \
+    f"README 版本徽章未同步（{_ver52}）"
+_chg52 = _pl52.Path(__file__).with_name("CHANGELOG.md").read_text(encoding="utf-8")
+assert f"## {_ver52} (" in _chg52, f"CHANGELOG 缺少 {_ver52} 版本段"
+
+print("OK  探针图真伪(PNG·无 webp 探针) / 魔数嗅探(含 avif·未知) / URL 扩展名兜底 / "
+      "ChatImage 支持清单 / 三档端到端(绿·黄·红·未知不误报) / 每条目只发一次 PNG / "
+      "单条目同构 / 前端三色与 README 同步")

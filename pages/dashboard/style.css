@@ -2134,6 +2134,13 @@ body {
   color: var(--text-color);
 }
 
+/* 产物受限：图床能用，但产物是 ChatImage 显示不出来的格式（如 webp） */
+.ib-test-result.warn {
+  background: color-mix(in srgb, var(--mc-yellow, #ffc107) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mc-yellow, #ffc107) 45%, transparent);
+  color: var(--text-color);
+}
+
 .ib-test-pending {
   color: var(--text-muted);
 }
@@ -2165,6 +2172,12 @@ body {
 .ib-item-test-result.fail {
   background: color-mix(in srgb, var(--mc-red, #f44336) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--mc-red, #f44336) 35%, transparent);
+  color: var(--text-color);
+}
+
+.ib-item-test-result.warn {
+  background: color-mix(in srgb, var(--mc-yellow, #ffc107) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mc-yellow, #ffc107) 40%, transparent);
   color: var(--text-color);
 }
 

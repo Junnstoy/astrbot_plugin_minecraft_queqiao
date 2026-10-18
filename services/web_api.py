@@ -232,7 +232,7 @@ class WebApiController:
             ("/terminal_logs", self.get_terminal_logs, ["GET"], "获取某台服务器的持久化终端日志"),
             ("/terminal_logs/clear", self.clear_terminal_logs, ["POST"], "清空某台服务器的持久化终端日志"),
             ("/image_bed/status", self.get_image_bed_status, ["GET"], "获取图床服务状态"),
-            ("/image_bed/test", self.test_image_bed_upload, ["POST"], "用内置测试图跑一次完整上传链"),
+            ("/image_bed/test", self.test_image_bed_upload, ["POST"], "用内置探针图跑上传链并按 ChatImage 兼容性分三档"),
             ("/image_bed/switch", self.switch_image_bed, ["POST"], "保存图床总开关与上传超时（局部生效，不断连接）"),
             (
                 "/image_bed/templates",
@@ -802,26 +802,23 @@ class WebApiController:
         return json_response(result)
 
     async def test_image_bed_upload(self) -> Any:
-        """用内置 1×1 测试图逐条跑上传链，返回成功 URL、失败原因与逐条明细。
+        """用内置探针图逐条跑上传链，按「通过 / 受限 / 失败」三档给出结论。
 
-        面板「🧪 测试上传」按钮调用：逐条测试每个条目，``results`` 给出
-        每条的名称 / 是否可用 / 成功 URL 或失败原因 / 耗时（毫秒），
-        ``ok`` 为是否有任一条目成功。请求体可带可选 ``index``：只测该
-        conf 下标条目（未生效条目不耗时，直接给出未生效原因）。
+        面板「🧪 测试上传」按钮调用。判定分两步：
+
+        1. **PNG 探针**：上传 1×1 PNG，验证上传链是否真的能走通；
+        2. **webp 探针**：再上传 1×1 webp，回读产物格式——ChatImage 只认
+           png / jpg / jpeg / jfif / gif / ico / bmp，产物仍是 webp（或 avif）
+           时图片在游戏里显示不出来，因此判「受限」（黄）而不是「通过」（绿）。
+
+        每条结果给出 ``level``（``ok`` / ``warn`` / ``fail``）、``ok``（上传链
+        是否通过）、``url``、``reason``、``elapsed_ms``、``format``（产物格式）
+        与 ``webp``（webp 探针明细）。请求体可带可选 ``index``：只测该 conf
+        下标条目（未生效条目不耗时，直接给出未生效原因）。
         """
         payload = await request.json(default={})
         if not isinstance(payload, dict):
             return error_response("请求体需为 JSON 对象", status_code=400)
-        # 1×1 透明 PNG：唯一用途是验证上传链是否真的能走通
-        try:
-            import base64
-
-            data = base64.b64decode(
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
-                "AAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-            )
-        except Exception:
-            return error_response("测试图生成失败", status_code=500)
         master_enabled = _as_bool(
             self.plugin.config.get("enable_image_upload")
             if self.plugin is not None else None,
@@ -836,85 +833,125 @@ class WebApiController:
                 return error_response("index 需为整数", status_code=400)
             if index < 0 or index >= len(entries):
                 return error_response(f"index 越界: {index}", status_code=400)
-            entry = entries[index]
-            if not isinstance(entry, dict):
+            if not isinstance(entries[index], dict):
                 return error_response("该条目配置无效", status_code=400)
-            kind = self._image_entry_kind(entry)
-            name = self._image_entry_name(entry, kind)
-            if not self._image_entry_active(entry, kind, master_enabled):
-                reason = self._image_entry_reason(entry, kind, master_enabled) or "未生效"
-                results = [{
-                    "name": name, "ok": False, "url": "",
-                    "elapsed_ms": 0, "reason": reason, "active": False,
-                }]
-                return json_response(
-                    {
-                        "ok": False,
-                        "url": "",
-                        "failures": [f"{name}: {reason}"],
-                        "results": results,
-                    }
-                )
-            target = self._image_uploader_for_index(entries, index, master_enabled)
-            if target is None:
-                return json_response(
-                    {
-                        "ok": False,
-                        "url": "",
-                        "failures": [f"{name}: 运行时实例不存在（服务未启动）"],
-                        "results": [{
-                            "name": name, "ok": False, "url": "",
-                            "elapsed_ms": 0,
-                            "reason": "运行时实例不存在（服务未启动）",
-                            "active": True,
-                        }],
-                    }
-                )
-            url, reason, elapsed_ms = await self._run_uploader_test(target, data)
-            results = [{
-                "name": name, "ok": bool(url), "url": url or "",
-                "elapsed_ms": elapsed_ms, "reason": reason, "active": True,
-            }]
-            failures = [item.strip() for item in reason.split("；") if item.strip()]
             return json_response(
-                {"ok": bool(url), "url": url or "", "failures": failures, "results": results}
+                self._image_bed_test_response(
+                    [await self._probe_image_entry(entries, index, master_enabled)]
+                )
             )
-        # 全量：逐条测试（含未生效条目，只报原因不耗时），每条都给出可用性
+        # 全量：逐条测试（含未生效条目，只报原因不耗时）
         results: list[dict[str, Any]] = []
         for i, entry in enumerate(entries):
             if not isinstance(entry, dict):
                 continue
-            kind = self._image_entry_kind(entry)
-            name = self._image_entry_name(entry, kind)
-            if not self._image_entry_active(entry, kind, master_enabled):
-                reason = self._image_entry_reason(entry, kind, master_enabled) or "未生效"
-                results.append({
-                    "name": name, "ok": False, "url": "",
-                    "elapsed_ms": 0, "reason": reason, "active": False,
-                })
-                continue
-            target = self._image_uploader_for_index(entries, i, master_enabled)
-            if target is None:
-                results.append({
-                    "name": name, "ok": False, "url": "",
-                    "elapsed_ms": 0, "reason": "运行时实例不存在（服务未启动）",
-                    "active": True,
-                })
-                continue
-            url, reason, elapsed_ms = await self._run_uploader_test(target, data)
-            results.append({
-                "name": name, "ok": bool(url), "url": url or "",
-                "elapsed_ms": elapsed_ms, "reason": reason, "active": True,
-            })
-        any_ok = any(r["ok"] for r in results)
-        first_url = next((r["url"] for r in results if r["ok"]), "")
-        failures = [
-            f"{r['name']}: {r['reason']}"
-            for r in results if not r["ok"] and r["reason"]
-        ]
-        return json_response(
-            {"ok": any_ok, "url": first_url, "failures": failures, "results": results}
+            results.append(await self._probe_image_entry(entries, i, master_enabled))
+        return json_response(self._image_bed_test_response(results))
+
+    async def _probe_image_entry(
+        self, entries: list[Any], index: int, master_enabled: bool
+    ) -> dict[str, Any]:
+        """实测单个图床条目，返回一条三档结论（``level`` / ``ok`` / ``url`` / ...）。
+
+        探针固定发 PNG——这正是群图片最常见的入参形态；再回读图床产物嗅探
+        真实格式。图床若把图片重新编码成 webp，产物 ChatImage 显示不出来，
+        判黄灯；产物格式兼容则绿灯。
+        """
+        from .image_bed import (
+            TEST_IMAGE_PNG,
+            format_from_url,
+            is_chatimage_compatible,
         )
+
+        entry = entries[index]
+        kind = self._image_entry_kind(entry)
+        name = self._image_entry_name(entry, kind)
+        result: dict[str, Any] = {
+            "name": name,
+            "ok": False,
+            "level": "fail",
+            "url": "",
+            "elapsed_ms": 0,
+            "reason": "",
+            "active": True,
+            "format": "",
+            "note": "",
+        }
+        if not self._image_entry_active(entry, kind, master_enabled):
+            result["active"] = False
+            result["reason"] = (
+                self._image_entry_reason(entry, kind, master_enabled) or "未生效"
+            )
+            return result
+        target = self._image_uploader_for_index(entries, index, master_enabled)
+        if target is None:
+            result["reason"] = "运行时实例不存在（服务未启动）"
+            return result
+
+        # 上传只做一次：传不上去直接判失败，传上去再核对产物格式
+        url, reason, elapsed_ms = await self._run_uploader_test(target, TEST_IMAGE_PNG)
+        result["elapsed_ms"] = elapsed_ms
+        if not url:
+            result["reason"] = reason
+            return result
+        result["ok"] = True
+        result["url"] = url
+        fmt, note = await self._inspect_served_image(url)
+        result["format"] = fmt or format_from_url(url)
+        result["note"] = note
+        if is_chatimage_compatible(result["format"]):
+            result["level"] = "ok"
+            return result
+        result["level"] = "warn"
+        suffix = f"（{note}）" if note else ""
+        # 讲清三件事：传进去的是什么、图床输出成了什么、为什么用不了
+        result["reason"] = (
+            f"传入的是 PNG，图床输出为 {result['format']}："
+            f"ChatImage 不支持 {result['format']}，游戏内显示不出来{suffix}"
+        )
+        return result
+
+    async def _inspect_served_image(self, url: str) -> tuple[str, str]:
+        """回读图床产物判断真实格式（独立成方法便于离线自检替换）。"""
+        from .image_bed import inspect_served_image
+
+        return await inspect_served_image(url, self._image_bed_timeout())
+
+    def _image_bed_test_response(self, results: list[dict[str, Any]]) -> dict[str, Any]:
+        """把逐条结论汇总成接口响应：``ok``/``level``/``url`` 外加分类计数。
+
+        未生效条目（总开关关、条目未启用、配置不合法）单独计入 ``inactive``，
+        不算进 ``fail``——它们从来没参与上传，混进「不可用」会让汇总失真。
+        """
+        counts = {"ok": 0, "warn": 0, "fail": 0, "inactive": 0}
+        for row in results:
+            key = "inactive" if row.get("active") is False else row["level"]
+            counts[key] = counts.get(key, 0) + 1
+        if counts["ok"]:
+            level = "ok"
+        elif counts["warn"]:
+            level = "warn"
+        else:
+            level = "fail"
+        return {
+            "ok": level != "fail",
+            "level": level,
+            "url": next((r["url"] for r in results if r["level"] != "fail"), ""),
+            "counts": counts,
+            # 未生效条目只体现在 counts.inactive 与 results[].active，
+            # 不进 failures/warnings（它们不是「测出来的」结论）
+            "failures": [
+                f"{r['name']}: {r['reason']}"
+                for r in results
+                if r["level"] == "fail" and r.get("active") is not False and r["reason"]
+            ],
+            "warnings": [
+                f"{r['name']}: {r['reason']}"
+                for r in results
+                if r["level"] == "warn" and r.get("active") is not False and r["reason"]
+            ],
+            "results": results,
+        }
 
     def _image_uploader_for_index(
         self, entries: list[Any], index: int, master_enabled: bool

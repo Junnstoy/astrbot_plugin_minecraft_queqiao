@@ -2084,8 +2084,7 @@ class DashboardApp {
         console.warn('测试前拉取图床状态失败:', e);
       }
     }
-    let okCount = 0;
-    let failCount = 0;
+    const counts = { ok: 0, warn: 0, fail: 0, inactive: 0 };
     try {
       const total = items.length;
       for (let i = 0; i < total; i++) {
@@ -2100,14 +2099,22 @@ class DashboardApp {
         const resp = await this.apiPost('image_bed/test', { index: idx });
         const data = (resp && resp.data) ? resp.data : resp;
         this._applyItemTestResult(idx, data, entryName);
-        if (data && data.ok) okCount += 1;
-        else failCount += 1;
+        const level = (data && (data.level === 'ok' || data.level === 'warn' || data.level === 'fail'))
+          ? data.level : (data && data.ok ? 'ok' : 'fail');
+        const rowsOf = (data && Array.isArray(data.results)) ? data.results : [];
+        // 未生效条目从没参与上传，单独计数，不混进「不可用」
+        const inactive = rowsOf.length === 1 && rowsOf[0].active === false;
+        counts[inactive ? 'inactive' : level] += 1;
       }
       if (result) {
-        result.className = okCount > 0 ? 'ib-test-result ok' : 'ib-test-result fail';
-        result.innerHTML = okCount > 0
-          ? `✅ ${okCount} 个可用${failCount > 0 ? `，${failCount} 个不可用` : ''}`
-          : `❌ 全部不可用（${failCount} 个）`;
+        const parts = [];
+        if (counts.ok) parts.push(`✅ ${counts.ok} 个通过`);
+        if (counts.warn) parts.push(`⚠ ${counts.warn} 个产物受限`);
+        if (counts.fail) parts.push(`❌ ${counts.fail} 个不可用`);
+        if (counts.inactive) parts.push(`⚠ ${counts.inactive} 个未生效`);
+        result.className = counts.ok > 0 ? 'ib-test-result ok'
+          : (counts.warn > 0 ? 'ib-test-result warn' : 'ib-test-result fail');
+        result.innerHTML = parts.length > 0 ? parts.join('，') : '未测试任何条目';
       }
     } catch (e) {
       if (result) {
@@ -2123,30 +2130,42 @@ class DashboardApp {
     }
   }
 
-  // 逐条结果表格：每条目一行，展示 名称 / 状态 / 耗时 / URL 或原因
+  // 逐条结果表格：每条目一行，展示 名称 / 状态 / 耗时 / URL 或原因。
+  // 状态三色：绿=通过（产物格式 ChatImage 能显示）、黄=可用但受限（图床
+  // 把图片转成了 webp 这类 ChatImage 显示不出来的格式）、红=失败。
   _renderTestRows(data) {
     const results = Array.isArray(data && data.results) ? data.results : null;
     if (!results || results.length === 0) return '';
     const rows = results.map(r => {
-      const ok = r.ok === true;
-      const active = r.active !== false;
-      const status = ok ? '✅ 可用'
-        : (active ? '❌ 不可用' : '⚠ 未生效');
-      const statusCls = ok ? 'row-ok'
-        : (active ? 'row-fail' : 'row-warn');
+      // 未生效条目（配置不合法 / 总开关关）与「传得上去但产物显示不出来」
+      // 共用黄灯，但文案必须分开，否则用户会以为配置已被采用
+      const inactive = r.active === false;
+      const level = inactive ? 'warn' : this._testRowLevel(r);
+      const status = inactive ? '⚠ 未生效'
+        : (level === 'ok' ? '✅ 可用' : (level === 'warn' ? '⚠ 产物受限' : '❌ 不可用'));
       const elapsed = (typeof r.elapsed_ms === 'number' && r.elapsed_ms >= 0)
         ? `${(r.elapsed_ms / 1000).toFixed(2)}s` : '—';
-      const detail = ok
-        ? `<a href="${escapeHtml(r.url || '')}" target="_blank" rel="noopener">${escapeHtml(r.url || '')}</a>`
-        : (r.reason ? escapeHtml(r.reason) : '无详细原因');
+      const link = r.url
+        ? `<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a>` : '';
+      const reason = r.reason ? escapeHtml(r.reason) : '';
+      const detail = level === 'fail'
+        ? (reason || '无详细原因')
+        : (link + (reason ? `${link ? ' · ' : ''}${reason}` : ''));
       return `<div class="ib-test-row">
         <span class="ib-test-row-name">${escapeHtml(r.name || '未命名条目')}</span>
-        <span class="ib-test-row-status ${statusCls}">${status}</span>
+        <span class="ib-test-row-status row-${level}">${status}</span>
         <span class="ib-test-row-time">${elapsed}</span>
         <span class="ib-test-row-detail">${detail}</span>
       </div>`;
     }).join('');
     return `<div class="ib-test-rows">${rows}</div>`;
+  }
+
+  // 单条结果的档位：优先后端 level，缺失时按 ok/active 兜底（旧响应兼容）
+  _testRowLevel(r) {
+    if (r && (r.level === 'ok' || r.level === 'warn' || r.level === 'fail')) return r.level;
+    if (r && r.ok === true) return 'ok';
+    return 'fail';
   }
 
   // 单条目测试：结果临时展示在对应条目的 ib-item-test-result 容器里
@@ -2186,18 +2205,24 @@ class DashboardApp {
   }
 
   // 把一次测试响应渲染进该条目的结果容器并保存（单条目与全量测试共用；
-  // 全量测试逐条回填到各自条目，自动刷新重绘后同样能恢复）
+  // 全量测试逐条回填到各自条目，自动刷新重绘后同样能恢复）。
+  // 三色：绿=通过、黄=产物受限、红=失败（无 level 的旧响应按 ok 兜底）
   _applyItemTestResult(index, data, entryName) {
     const box = document.querySelector(`.ib-item-test-result[data-test-result="${index}"]`);
     if (!box) return;
     box.classList.remove('hidden');
     const rows = this._renderTestRows(data);
-    if (data && data.ok) {
-      box.className = 'ib-item-test-result ok';
-      box.innerHTML = `✅ 可用${data.url
-        ? `：<a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">${escapeHtml(data.url)}</a>` : ''}${rows}`;
+    const level = (data && (data.level === 'ok' || data.level === 'warn' || data.level === 'fail'))
+      ? data.level
+      : (data && data.ok ? 'ok' : 'fail');
+    const url = data && data.url
+      ? `<a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">${escapeHtml(data.url)}</a>` : '';
+    box.className = `ib-item-test-result ${level}`;
+    if (level === 'ok') {
+      box.innerHTML = `✅ 可用${url ? `：${url}` : ''}${rows}`;
+    } else if (level === 'warn') {
+      box.innerHTML = `⚠ 可用但游戏内显示不出来${url ? `：${url}` : ''}${rows}`;
     } else {
-      box.className = 'ib-item-test-result fail';
       box.innerHTML = `❌ 不可用${rows}`;
     }
     // 存最近一次测试结果：自动刷新重绘条目列表后回填，避免结果一闪而过
@@ -2221,7 +2246,7 @@ class DashboardApp {
       if (!hit) return;
       this._applyItemTestResult(
         box.getAttribute('data-test-result'),
-        { ok: hit.ok === true, url: hit.url || '', results: [hit] },
+        { ok: hit.ok === true, level: hit.level, url: hit.url || '', results: [hit] },
         entryName,
       );
     });

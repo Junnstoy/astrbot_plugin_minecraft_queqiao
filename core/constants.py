@@ -113,6 +113,18 @@ API_SET_MSG_EMOJI_LIKE = "set_msg_emoji_like"
 # 图片以 [[CICode,url=...,name=...]] 代码广播进聊天栏，name 缺省用此名称
 DEFAULT_CHATIMAGE_NAME = "图片"
 
+# ChatImage 能解码的图片格式（官方「支持格式」段落：png / jpg / jpeg / jfif /
+# gif / ico / bmp）。webp、avif 不在其中——图床产物是这些格式时游戏内不会
+# 渲染出图片，图床检测因此把它们判为「受限」而不是「通过」
+CHATIMAGE_SUPPORTED_FORMATS: tuple[str, ...] = (
+    "png",
+    "jpeg",
+    "jfif",
+    "gif",
+    "ico",
+    "bmp",
+)
+
 # 第三方图床上传超时（秒，对应根级配置 image_upload_timeout）
 DEFAULT_IMAGE_UPLOAD_TIMEOUT = 30
 
