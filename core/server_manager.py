@@ -22,6 +22,7 @@ class ServerInstance:
         on_connect=None,
         on_disconnect=None,
         on_reconnect=None,
+        on_connect_fail=None,
     ) -> None:
         self.config = config
         self.server_name = config.server_name
@@ -67,12 +68,19 @@ class ServerInstance:
                 if asyncio.iscoroutine(res):
                     await res
 
+        async def _wrapped_on_connect_fail(reason: str) -> None:
+            if on_connect_fail:
+                res = on_connect_fail(reason)
+                if asyncio.iscoroutine(res):
+                    await res
+
         self.client = QueQiaoClient(
             config,
             on_event=_wrapped_on_event,
             on_connect=_wrapped_on_connect,
             on_disconnect=_wrapped_on_disconnect,
             on_reconnect=on_reconnect,
+            on_connect_fail=_wrapped_on_connect_fail,
         )
         self.rcon = RconClient(config)
         self._task: asyncio.Task | None = None
@@ -308,6 +316,7 @@ class ServerManager:
         on_connect=None,
         on_disconnect=None,
         on_reconnect=None,
+        on_connect_fail=None,
     ) -> ServerInstance:
         instance = ServerInstance(
             config,
@@ -315,6 +324,7 @@ class ServerManager:
             on_connect=on_connect,
             on_disconnect=on_disconnect,
             on_reconnect=on_reconnect,
+            on_connect_fail=on_connect_fail,
         )
         self._servers[config.server_name] = instance
         return instance

@@ -57,7 +57,7 @@ TEMPLATE_KEY_BUILTIN_HTTP = "builtin_http"
     PLUGIN_NAME,
     "XTsat",
     "通过鹊桥模组连接 Minecraft 服务器，实现消息互通、服务器管理与 AI 聊天",
-    "v0.3.4",
+    "v0.6.6",
     "https://github.com/XTsat/astrbot_plugin_minecraft_queqiao",
 )
 class MinecraftQueQiaoPlugin(Star):
@@ -159,6 +159,7 @@ class MinecraftQueQiaoPlugin(Star):
                 on_connect=self._make_connect_handler(config.server_name),
                 on_disconnect=self._make_disconnect_handler(config.server_name),
                 on_reconnect=self._make_reconnect_handler(config.server_name),
+                on_connect_fail=self._make_connect_fail_handler(config.server_name),
             )
 
             if config.custom_cmd_list:
@@ -210,6 +211,10 @@ class MinecraftQueQiaoPlugin(Star):
         "auto_forward_prefix",
         "target_sessions",
         "terminal_days",
+        "notify_on_connect",
+        "notify_on_connect_format",
+        "notify_on_connect_fail",
+        "notify_on_connect_fail_format",
     )
     # 布尔型软配置键 → (解析失败时的兜底默认值)，与 _conf_schema.json 默认一致
     _SOFT_BOOL_DEFAULTS = {
@@ -221,6 +226,8 @@ class MinecraftQueQiaoPlugin(Star):
         "forward_achievement_to_astrbot": False,
         "forward_image_to_mc": False,
         "forward_image_from_mc": False,
+        "notify_on_connect": False,
+        "notify_on_connect_fail": False,
     }
 
     def apply_soft_config(self, server_name: str, fields: dict) -> bool:
@@ -415,32 +422,81 @@ class MinecraftQueQiaoPlugin(Star):
         """
         if not config.target_sessions:
             return
+        await self._send_text_to_sessions(
+            config,
+            f"⚠️ 配置告警：server_name「{config.server_name}」"
+            "与已有服务器重复，本服务器的配置已被忽略、未启用。"
+            "请修改本服务器的 server_name（需与鹊桥 config.yml 的 "
+            "server_name 一致），否则本服务器不会启用。",
+        )
+
+    async def _notify_server_online(self, server_name: str) -> None:
+        """服务器连通后按配置向目标会话发送「服务器已启动」通知。
+
+        每次连接建立都会触发（含断线重连、插件热重载后重新连上）；
+        开关关闭或未配置目标会话时静默跳过。发送失败只告警，
+        不影响连接本身（连接回调由 QueQiaoClient 统一兜底）。
+        """
+        config = self._configs.get(server_name)
+        if config is None or not config.notify_on_connect:
+            return
+        sent = await self._send_text_to_sessions(
+            config, config.render_connect_notice()
+        )
+        if sent:
+            logger.info(
+                f"[{PLUGIN_NAME}][{server_name}] 已向 {sent}/"
+                f"{len(config.target_sessions)} 个会话发送服务器启动通知"
+            )
+
+    async def _notify_server_fail(self, server_name: str) -> None:
+        """连接失败时按配置向目标会话发送「连接失败」通知。
+
+        由 QueQiaoClient 保证同一轮故障只触发一次（重连期间不重复），
+        重新连上后下一轮故障会再次通知；开关关闭或未配置目标会话时跳过。
+        """
+        config = self._configs.get(server_name)
+        if config is None or not config.notify_on_connect_fail:
+            return
+        sent = await self._send_text_to_sessions(
+            config, config.render_connect_fail_notice()
+        )
+        if sent:
+            logger.info(
+                f"[{PLUGIN_NAME}][{server_name}] 已向 {sent}/"
+                f"{len(config.target_sessions)} 个会话发送连接失败通知"
+            )
+
+    async def _send_text_to_sessions(self, config: ServerConfig, text: str) -> int:
+        """向该服务器的全部目标会话发送一条纯文本，返回成功会话数。
+
+        单会话失败只记警告并继续，不影响其余会话与连接本身。
+        """
+        if not text or not config.target_sessions:
+            return 0
         try:
             from astrbot.api.event import MessageChain
             from astrbot.api.message_components import Plain
 
-            chain = MessageChain(
-                chain=[
-                    Plain(
-                        text=(
-                            f"⚠️ 配置告警：server_name「{config.server_name}」"
-                            "与已有服务器重复，本服务器的配置已被忽略、未启用。"
-                            "请修改本服务器的 server_name（需与鹊桥 config.yml 的 "
-                            "server_name 一致），否则本服务器不会启用。"
-                        )
-                    )
-                ]
-            )
-            for umo in config.target_sessions:
-                try:
-                    await self.context.send_message(umo, chain)
-                except Exception:
-                    logger.warning(
-                        f"[{PLUGIN_NAME}] 向 {umo} 发送重复配置告警失败",
-                        exc_info=True,
-                    )
+            chain = MessageChain(chain=[Plain(text=text)])
         except Exception:
-            logger.warning(f"[{PLUGIN_NAME}] 发送重复配置告警失败", exc_info=True)
+            logger.warning(
+                f"[{PLUGIN_NAME}][{config.server_name}] 构建通知消息失败",
+                exc_info=True,
+            )
+            return 0
+
+        sent = 0
+        for umo in config.target_sessions:
+            try:
+                await self.context.send_message(umo, chain)
+                sent += 1
+            except Exception:
+                logger.warning(
+                    f"[{PLUGIN_NAME}][{config.server_name}] 向 {umo} 发送通知失败",
+                    exc_info=True,
+                )
+        return sent
 
     # ---- 事件回调构造 ----
 
@@ -457,6 +513,7 @@ class MinecraftQueQiaoPlugin(Star):
                 "conn", server_name, "连接恢复", {"event": "connected"}
             )
             self.terminal_logs.append(server_name, "conn", "🟢 连接恢复")
+            await self._notify_server_online(server_name)
 
         return _handler
 
@@ -467,6 +524,16 @@ class MinecraftQueQiaoPlugin(Star):
                 "conn", server_name, f"连接断开: {reason}", {"reason": reason}
             )
             self.terminal_logs.append(server_name, "conn", f"🔴 连接断开: {reason}")
+
+        return _handler
+
+    def _make_connect_fail_handler(self, server_name: str):
+        async def _handler(reason: str) -> None:
+            # 同一轮故障（直到重新连上）由 QueQiaoClient 去重，只在第一条失败
+            # 时回调；已连接后断线的终端记录由 disconnect 回调负责，这里不再
+            # 重复写同义终端行，只补日志并按配置发通知
+            logger.warning(f"[{PLUGIN_NAME}][{server_name}] 连接失败: {reason}")
+            await self._notify_server_fail(server_name)
 
         return _handler
 

@@ -1,7 +1,7 @@
 <div align="center">
 <h1>Minecraft Queqiao</h1>
 <p><strong>Connect Minecraft servers to AstrBot via the QueQiao mod for message and image bridging, server management and AI chat</strong></p>
-<p><img alt="version" src="https://img.shields.io/badge/version-v0.6.5-blue"></p>
+<p><img alt="version" src="https://img.shields.io/badge/version-v0.6.6-blue"></p>
 <p><sub>Minecraft &nbsp;&nbsp; QueQiao &nbsp;&nbsp; Message Bridge &nbsp;&nbsp; Image Bridge &nbsp;&nbsp; AI Chat</sub></p>
 <p><a href="README.md">中文</a> &nbsp;/&nbsp; <strong>English</strong></p>
 </div>
@@ -13,6 +13,7 @@ Connects Minecraft servers to AstrBot through the [QueQiao](https://github.com/1
 - **Chat bridge**: two-way forwarding between in-game chat and group messages; replying to a game message forwarded by the bot automatically prepends `@原玩家名` (the original player name) in-game, so everyone sees who replied
 - **Image forwarding**: group images relayed into the game (players need the [ChatImage](https://github.com/kitUIN/ChatImage) mod installed to render them); in-game images / links are downloaded and sent back to the group
 - **Event broadcast**: player join / quit / death / achievement events forwarded to sessions (death & achievements unsupported on Vanilla/Velocity)
+- **Connection notification**: send a “server started” / “connection failed” notice to the target sessions when the server connects or fails to connect, with customizable templates
 - **Server management**: status queries, online player list, remote command execution
 - **Web Dashboard**: view server status, performance monitoring (TPS / latency), the bridge terminal in real time and connection observability (reconnect count / phase / limit alert, API timeout count), with quick broadcast and command console
 - **Image-bed panel**: a dedicated “🖼️ 图床” tab at the right end of the dashboard's server-tab bar to manage image transfer directly — the master switch, upload timeout, full add/edit/delete of image bed entries, the built-in HTTP service runtime state, and a one-click test upload that runs the whole chain with a built-in 1×1 test image
@@ -82,6 +83,7 @@ Below the server cards and the performance-monitoring panel, the dashboard has a
 
 - **AI chat** (per server): turn in-game AI chat on / off and set its trigger prefix. A chat message starting with the prefix goes to the AI only — the reply is sent to that player as a private message and the message is not forwarded to the group; an empty prefix disables AI triggering and leaves normal chat untouched. Saving writes the plugin config and takes effect immediately without rebuilding connections, so it is the same setting as `enable_ai_chat` / `ai_chat_prefix` in the WebUI
 - **Message forwarding** (per server): toggles for chat / join-leave / death / achievement forwarding, the chat message format (`{player}` `{message}` `{display_name}` placeholders), the group→MC trigger prefix (empty = forward everything) and the target sessions (one UMO per line). These are the same settings as in the “Message-forwarding configuration” table; saving takes effect immediately without rebuilding connections
+- **Connection notification** (per server): send a notice to the target sessions when the server connects or fails to connect, with independent switches for the two cases and templates supporting the `{display_name}` `{server_name}` placeholders; the failure notice fires only for the first failure of an outage. The same settings as in the “Server-connection notification” table; saving takes effect immediately without rebuilding connections
 - **Terminal window** (per server): how many days of interop-terminal logs to load (0–30, default 2 = today plus yesterday, 0 = keep all shards). Stored at the top level of the config entry — the same setting as `terminal_days` in the WebUI; saving takes effect immediately without rebuilding connections
 - Monitoring parameters themselves (enabled, sample interval, realtime rate, retention, TPS command, latency probe, default view) still live in the “⚙ 设置” dialog of the monitoring panel
 
@@ -146,6 +148,24 @@ Common `mark_emoji_id` values:
 | `EMOJI_ROSE` | `63` | 🌹 |
 
 </details>
+
+### Server-connection notification
+
+<details>
+<summary>Show options</summary>
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `notify_on_connect` | bool | `false` | Send a “server started” notice to the target sessions once the server connects; fires on every connection (including reconnects and after a plugin reload) |
+| `notify_on_connect_format` | string | `[{display_name}] 🟢 服务器已启动` | Multiline notice template; supports the `{display_name}` and `{server_name}` placeholders; empty uses the default template |
+| `notify_on_connect_fail` | bool | `false` | Send a “connection failed” notice to the target sessions when the first connection attempt fails or an established connection drops; only the first failure of an outage is sent, and the next outage notifies again after a successful reconnect |
+| `notify_on_connect_fail_format` | string | `[{display_name}] 🔴 服务器连接失败` | Multiline failure notice template; supports the `{display_name}` and `{server_name}` placeholders; empty uses the default template |
+
+</details>
+
+With “server-connection notification” enabled, every connection of that server sends a notice to its **target sessions**; nothing is sent at all when no target session is configured. Only `{display_name}` (server display name) and `{server_name}` (server name) are replaced — any other braces are kept verbatim.
+
+With “connection-failure notification” enabled, a “connection failed” notice is sent both when the server has never been reachable and when an established connection drops; only the first message per outage (until the connection is re-established) is sent, so reconnect retries do not flood the chat. In reverse mode the plugin cannot tell “the server is not started yet” from “QueQiao has not dialled in yet”, so the failure notice is only sent when an established connection drops.
 
 ### Relaying images into the game (ChatImage)
 
@@ -235,10 +255,10 @@ Format placeholders:
 |-------------|--------------|---------|
 | `{player}` | `forward_chat_format` | Player name |
 | `{message}` | both formats | Message content |
-| `{display_name}` | both formats | Server display name; falls back to `display_name_default` (`MC`) when blank, renders empty only when both are cleared |
+| `{display_name}` | both formats, `notify_on_connect_format`, `notify_on_connect_fail_format` | Server display name; falls back to `display_name_default` (`MC`) when blank, renders empty only when both are cleared |
 | `{platform}` | `broadcast_format` | Platform name (may be rewritten via `platform_names`, e.g. `aiocqhttp` → `QQ`) |
 | `{sender}` | `broadcast_format` | Sender name |
-| `{server_name}` | `broadcast_format` | Server name (always populated) |
+| `{server_name}` | `broadcast_format`, `notify_on_connect_format`, `notify_on_connect_fail_format` | Server name (always populated) |
 
 Example: `display_name` = `生存服`, format `[{display_name}] <{player}> {message}` → `[生存服] <Steve> 大家好`; with nothing filled in → `[MC] <Steve> 大家好`.
 

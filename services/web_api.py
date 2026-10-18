@@ -18,6 +18,8 @@ from astrbot.api import logger
 from ..core.constants import (
     DEFAULT_CHAT_FORMAT,
     DEFAULT_CLIENT_ORIGIN,
+    DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
+    DEFAULT_CONNECT_NOTIFY_FORMAT,
     DEFAULT_IMAGE_UPLOAD_TIMEOUT,
     DEFAULT_REVERSE_HOST,
     DEFAULT_REVERSE_PATH,
@@ -1178,6 +1180,21 @@ class WebApiController:
                         entry.get("terminal_days"), DEFAULT_TERMINAL_DAYS,
                         TERMINAL_DAYS_MIN, TERMINAL_DAYS_MAX,
                     ),
+                    # 服务器连通通知（条目顶层，与 enable_ai_chat 平级）
+                    "notify_on_connect": _as_bool(
+                        entry.get("notify_on_connect"), False
+                    ),
+                    "notify_on_connect_format": str(
+                        entry.get("notify_on_connect_format")
+                        or DEFAULT_CONNECT_NOTIFY_FORMAT
+                    ),
+                    "notify_on_connect_fail": _as_bool(
+                        entry.get("notify_on_connect_fail"), False
+                    ),
+                    "notify_on_connect_fail_format": str(
+                        entry.get("notify_on_connect_fail_format")
+                        or DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT
+                    ),
                     # 消息转发配置（面板「功能设置」读写）：message 子对象按
                     # ServerConfig.from_dict 同源读取，缺省值与 schema 默认一致
                     "message": self._message_view(entry),
@@ -1365,6 +1382,25 @@ class WebApiController:
                 payload.get("terminal_days"), DEFAULT_TERMINAL_DAYS,
                 TERMINAL_DAYS_MIN, TERMINAL_DAYS_MAX,
             )
+        # 服务器连通通知（条目顶层，与 enable_ai_chat 平级）：开关 + 文案模板，
+        # 文案留空由 ServerConfig 回落默认（不发送空消息）
+        if "notify_on_connect" in payload:
+            entry["notify_on_connect"] = _as_bool(
+                payload.get("notify_on_connect"), False
+            )
+        if "notify_on_connect_format" in payload:
+            entry["notify_on_connect_format"] = str(
+                payload.get("notify_on_connect_format") or ""
+            ).strip()
+        # 连接失败通知（条目顶层）：开关 + 文案模板，模板留空同样回落默认
+        if "notify_on_connect_fail" in payload:
+            entry["notify_on_connect_fail"] = _as_bool(
+                payload.get("notify_on_connect_fail"), False
+            )
+        if "notify_on_connect_fail_format" in payload:
+            entry["notify_on_connect_fail_format"] = str(
+                payload.get("notify_on_connect_fail_format") or ""
+            ).strip()
         # 消息转发配置（面板「功能设置」）：message 子对象按「显式出现」键
         # 合并，漏传不清空。字段名与 ServerConfig 属性 / main 层软更新键一致
         message_payload = payload.get("message")

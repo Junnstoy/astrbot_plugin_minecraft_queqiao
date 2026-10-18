@@ -12,6 +12,8 @@ from .constants import (
     DEFAULT_CHAT_FORMAT,
     DEFAULT_CHATIMAGE_NAME,
     DEFAULT_CLIENT_ORIGIN,
+    DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
+    DEFAULT_CONNECT_NOTIFY_FORMAT,
     DEFAULT_DISPLAY_NAME,
     DEFAULT_LOW_FREQUENCY_INTERVAL,
     DEFAULT_LOW_FREQUENCY_THRESHOLD,
@@ -187,6 +189,14 @@ class ServerConfig:
     text2image: bool = True
     # 互通终端加载最近几天的日志分片（0=全部保留分片），每台服务器独立
     terminal_days: int = DEFAULT_TERMINAL_DAYS
+    # 服务器连通通知：连接建立（含断线重连、插件热重载）时向目标会话
+    # 发送「服务器已启动」；默认关闭，避免升级后打扰已有配置
+    notify_on_connect: bool = False
+    notify_on_connect_format: str = DEFAULT_CONNECT_NOTIFY_FORMAT
+    # 连接失败通知：初次连不上与已连接后断线都算，同一轮故障（直到重新
+    # 连上）只发第一条，避免重试期间刷屏
+    notify_on_connect_fail: bool = False
+    notify_on_connect_fail_format: str = DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT
 
     # ---- 消息转发 ----
     forward_chat_to_astrbot: bool = True
@@ -264,6 +274,30 @@ class ServerConfig:
         否则会变成没有主语的半句话。
         """
         return self.server_label or self.server_name or "未知"
+
+    def _render_notice(self, template: str) -> str:
+        """替换通知文案里的 `{display_name}` / `{server_name}` 占位符。
+
+        只做字符串替换、不用 `str.format`：用户文案里的 `{` / `}`（颜文字、
+        JSON 片段等）会让 format 抛 ValueError，而这段代码跑在连接回调里，
+        异常会导致整条通知发不出去。其余花括号原样保留。
+        """
+        text = template.strip().replace("{display_name}", self.server_label)
+        return text.replace("{server_name}", self.server_name).strip()
+
+    def render_connect_notice(self) -> str:
+        """渲染「服务器已启动」通知文案（模板留空时回落默认文案）。"""
+        return (
+            self._render_notice(self.notify_on_connect_format)
+            or DEFAULT_CONNECT_NOTIFY_FORMAT
+        )
+
+    def render_connect_fail_notice(self) -> str:
+        """渲染「服务器连接失败」通知文案（模板留空时回落默认文案）。"""
+        return (
+            self._render_notice(self.notify_on_connect_fail_format)
+            or DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT
+        )
 
     def platform_display_name(self, platform: str) -> str:
         """把原始平台名按用户映射转换为游戏内展示名；未命中时原样返回。
@@ -432,6 +466,20 @@ class ServerConfig:
             terminal_days=_to_int_clamped(
                 data.get("terminal_days"), DEFAULT_TERMINAL_DAYS, 0, 30
             ),
+            notify_on_connect=_to_bool(data.get("notify_on_connect"), False),
+            # 模板留空回落默认文案（显式清空 = 用默认，不发送空消息）
+            notify_on_connect_format=_to_str(
+                data.get("notify_on_connect_format"), DEFAULT_CONNECT_NOTIFY_FORMAT
+            ).strip()
+            or DEFAULT_CONNECT_NOTIFY_FORMAT,
+            notify_on_connect_fail=_to_bool(
+                data.get("notify_on_connect_fail"), False
+            ),
+            notify_on_connect_fail_format=_to_str(
+                data.get("notify_on_connect_fail_format"),
+                DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
+            ).strip()
+            or DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
             forward_chat_to_astrbot=_to_bool(message.get("forward_chat_to_astrbot"), True),
             forward_chat_format=_to_str(
                 message.get("forward_chat_format"), DEFAULT_CHAT_FORMAT

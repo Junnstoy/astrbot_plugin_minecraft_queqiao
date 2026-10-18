@@ -3228,6 +3228,31 @@ class DashboardApp {
         : 2;
       daysBox.value = String(Math.max(0, Math.min(30, daysVal)));
     }
+    // 服务器连通通知（conf 条目顶层，与 enable_ai_chat 平级）：开关 + 文案。
+    // 正在编辑的控件不回写，避免打断输入
+    const notifyBox = document.getElementById('st-notify-connect');
+    const notifyFormat = document.getElementById('st-notify-format');
+    const notifyFailBox = document.getElementById('st-notify-fail');
+    const notifyFailFormat = document.getElementById('st-notify-fail-format');
+    const notifyFocused = [notifyBox, notifyFormat, notifyFailBox, notifyFailFormat]
+      .some((el) => el && document.activeElement === el);
+    if (!notifyFocused) {
+      if (notifyBox) notifyBox.checked = !!(confItem && confItem.notify_on_connect);
+      if (notifyFormat) {
+        notifyFormat.value = confItem && typeof confItem.notify_on_connect_format === 'string'
+          ? confItem.notify_on_connect_format
+          : '';
+      }
+      if (notifyFailBox) {
+        notifyFailBox.checked = !!(confItem && confItem.notify_on_connect_fail);
+      }
+      if (notifyFailFormat) {
+        notifyFailFormat.value = confItem
+          && typeof confItem.notify_on_connect_fail_format === 'string'
+          ? confItem.notify_on_connect_fail_format
+          : '';
+      }
+    }
     // 消息转发配置（conf 的 message 子对象，缺省回落后端 _message_view 默认）：
     // 任一转发控件正被编辑时整组不回写，避免打断输入
     const fwdBoxes = {
@@ -3321,6 +3346,17 @@ class DashboardApp {
         // 互通终端加载天数（单服生效，0~30；后端会再钳制一次）
         daysChanged = daysVal !== this.terminalDaysFor(server.server_name);
         payload.terminal_days = daysVal;
+        // 服务器连通通知（条目顶层）：开关 + 文案模板（留空 = 后端回落默认文案）
+        const notifyBox = document.getElementById('st-notify-connect');
+        const notifyFormat = document.getElementById('st-notify-format');
+        payload.notify_on_connect = !!(notifyBox && notifyBox.checked);
+        payload.notify_on_connect_format = notifyFormat ? notifyFormat.value.trim() : '';
+        // 连接失败通知（条目顶层）：同一轮故障只发第一条，后端负责去重
+        const notifyFailBox = document.getElementById('st-notify-fail');
+        const notifyFailFormat = document.getElementById('st-notify-fail-format');
+        payload.notify_on_connect_fail = !!(notifyFailBox && notifyFailBox.checked);
+        payload.notify_on_connect_fail_format =
+          notifyFailFormat ? notifyFailFormat.value.trim() : '';
         // 消息转发：显式提交全部值（面板展示的即当前生效值，覆盖语义）
         const msg = {};
         const fwdChat = document.getElementById('st-fwd-chat');

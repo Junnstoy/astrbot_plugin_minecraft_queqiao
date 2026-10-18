@@ -2584,7 +2584,9 @@ class _Ctx32:
 
 
 class _Self32:
-    """插件桩 self：仅含 context。"""
+    """插件桩 self：仅含 context 与共用的逐会话发送方法。"""
+    _send_text_to_sessions = _P32._send_text_to_sessions
+
     def __init__(self, ctx):
         self.context = ctx
 
@@ -4505,6 +4507,10 @@ _wac44 = _WAC44(
 )
 
 from astrbot_plugin_minecraft_queqiao.core.models_config import _to_bool as _to_bool44
+from astrbot_plugin_minecraft_queqiao.core.constants import (
+    DEFAULT_CONNECT_NOTIFY_FORMAT as _DCN44,
+    DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT as _DCNF44,
+)
 
 _plugin44.SOFT_CONFIG_KEYS = (
     "enable_ai_chat",
@@ -4518,6 +4524,10 @@ _plugin44.SOFT_CONFIG_KEYS = (
     "auto_forward_prefix",
     "target_sessions",
     "terminal_days",
+    "notify_on_connect",
+    "notify_on_connect_format",
+    "notify_on_connect_fail",
+    "notify_on_connect_fail_format",
 )
 
 
@@ -4533,6 +4543,8 @@ def _apply_soft44(server_name, fields):
         "forward_join_leave_to_astrbot": False,
         "forward_death_to_astrbot": False,
         "forward_achievement_to_astrbot": False,
+        "notify_on_connect": False,
+        "notify_on_connect_fail": False,
     }
     applied = False
     for _key in _plugin44.SOFT_CONFIG_KEYS:
@@ -4690,6 +4702,51 @@ assert _it44e["message"]["auto_forward_prefix"] == "!"
 assert _it44e["target_sessions"] == ["umo:GroupMessage:9", "umo:GroupMessage:2"]
 # 本地翻译开关回显：面板保存后必须原样返回，否则前端把复选框重置为取消
 assert _it44e["message"]["enable_local_translation"] is False
+
+# 服务器连通通知（条目顶层，与 enable_ai_chat 平级）：列表默认关闭 + 文案回落默认
+assert _it44d["notify_on_connect"] is False
+assert _it44d["notify_on_connect_format"] == _DCN44, _it44d
+assert _it44d["notify_on_connect_fail"] is False
+assert _it44d["notify_on_connect_fail_format"] == _DCNF44, _it44d
+# 保存开关 + 自定义文案 → 落盘 + 运行时就地生效，且不得热重载
+_set_payload44({"index": 0, "notify_on_connect": "true",
+                "notify_on_connect_format": "  {display_name} 已启动  "})
+_resp44n = asyncio.run(_wac44.update_config_server())
+assert _resp44n["data"]["saved"] is True
+assert _resp44n["data"]["reloaded"] is False, "连通通知属软字段，不得热重载"
+_entry44n = _plugin44.config["mc_servers"][0]
+assert _entry44n["notify_on_connect"] is True
+assert _entry44n["notify_on_connect_format"] == "{display_name} 已启动", \
+    "文案需 strip 后落盘"
+assert _cfg44_run.notify_on_connect is True
+assert _cfg44_run.notify_on_connect_format == "{display_name} 已启动", \
+    "运行时 ServerConfig 必须就地更新"
+assert _plugin44.reloads == 0
+# 回读与落盘一致
+_it44n = asyncio.run(_wac44.get_config_servers())["data"]["servers"][0]
+assert _it44n["notify_on_connect"] is True
+assert _it44n["notify_on_connect_format"] == "{display_name} 已启动"
+# 关闭同样落盘（false 不得被过滤）
+_set_payload44({"index": 0, "notify_on_connect": False})
+asyncio.run(_wac44.update_config_server())
+assert _plugin44.config["mc_servers"][0]["notify_on_connect"] is False
+assert _cfg44_run.notify_on_connect is False and _plugin44.reloads == 0
+
+# 连接失败通知（条目顶层独立开关 + 文案）：同属软字段，开 / 关都落盘且不重载
+_set_payload44({"index": 0, "notify_on_connect_fail": True,
+                "notify_on_connect_fail_format": " {display_name} 连接失败 "})
+_resp44f = asyncio.run(_wac44.update_config_server())
+assert _resp44f["data"]["saved"] is True
+assert _resp44f["data"]["reloaded"] is False, "连接失败通知属软字段，不得热重载"
+_entry44f = _plugin44.config["mc_servers"][0]
+assert _entry44f["notify_on_connect_fail"] is True
+assert _entry44f["notify_on_connect_fail_format"] == "{display_name} 连接失败"
+assert _cfg44_run.notify_on_connect_fail is True
+assert _cfg44_run.notify_on_connect_fail_format == "{display_name} 连接失败"
+assert _plugin44.reloads == 0
+_it44f = asyncio.run(_wac44.get_config_servers())["data"]["servers"][0]
+assert _it44f["notify_on_connect_fail"] is True
+assert _it44f["notify_on_connect_fail_format"] == "{display_name} 连接失败"
 
 # 连接类字段（display_name / ws_url / enabled 等）仍走完整热重载
 _set_payload44({"index": 0, "enable_ai_chat": True, "display_name": "新名字"})
@@ -5768,3 +5825,331 @@ assert _run49(_pi50h.on_message(_ev50h)) == []
 assert _inst50h.client.sent == [("[QQ]群友A: @Player_D 1", "white")], \
     _inst50h.client.sent
 print("OK  回复游戏消息反解玩家名 / 非游戏消息不加 @ / 自定义格式与显示名 / 非法玩家名 全通过")
+
+print("\n=== 51. 服务器连通通知（默认关闭 / 文案模板 / 连接回调发送） ===")
+from astrbot_plugin_minecraft_queqiao.core.constants import (
+    DEFAULT_CONNECT_NOTIFY_FORMAT as _DCN51,
+    DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT as _DCNF51,
+)
+from astrbot_plugin_minecraft_queqiao.core.models_config import ServerConfig as _SC51
+
+# (a) 默认值：关闭 + 默认文案（与 schema 默认一致由第 22 组守卫）
+_cfg51_def = _SC51.from_dict({})
+assert _cfg51_def.notify_on_connect is False
+assert _cfg51_def.notify_on_connect_format == _DCN51
+assert _DCN51 == "[{display_name}] 🟢 服务器已启动", _DCN51
+assert _cfg51_def.render_connect_notice() == "[MC] 🟢 服务器已启动", \
+    _cfg51_def.render_connect_notice()
+assert _cfg51_def.notify_on_connect_fail is False
+assert _cfg51_def.notify_on_connect_fail_format == _DCNF51
+assert _DCNF51 == "[{display_name}] 🔴 服务器连接失败", _DCNF51
+assert _cfg51_def.render_connect_fail_notice() == "[MC] 🔴 服务器连接失败", \
+    _cfg51_def.render_connect_fail_notice()
+
+# (b2) 连接失败通知：独立开关（可与连通通知分开）+ 独立文案
+_cfg51_failon = _SC51.from_dict({
+    "notify_on_connect_fail": "1",
+    "notify_on_connect_fail_format": "❌ {display_name}（{server_name}）连接失败",
+    "server": {"server_name": "survival", "display_name": "生存服"},
+})
+assert _cfg51_failon.notify_on_connect_fail is True
+assert _cfg51_failon.notify_on_connect is False, "两个开关必须互相独立"
+assert _cfg51_failon.render_connect_fail_notice() == "❌ 生存服（survival）连接失败", \
+    _cfg51_failon.render_connect_fail_notice()
+assert _SC51.from_dict(
+    {"notify_on_connect_fail_format": "   "}
+).notify_on_connect_fail_format == _DCNF51
+
+# (b) 显式开启（字符串布尔）+ 占位符替换
+_cfg51 = _SC51.from_dict({
+    "notify_on_connect": "true",
+    "notify_on_connect_format": "✅ {display_name}（{server_name}）已启动",
+    "server": {"server_name": "survival", "display_name": "生存服"},
+})
+assert _cfg51.notify_on_connect is True
+assert _cfg51.render_connect_notice() == "✅ 生存服（survival）已启动", \
+    _cfg51.render_connect_notice()
+assert _SC51.from_dict({"notify_on_connect": "0"}).notify_on_connect is False
+
+# (c) 模板空白 → 默认文案；未知花括号 / format 元字符不得抛异常
+assert _SC51.from_dict({"notify_on_connect_format": "   "}).notify_on_connect_format == _DCN51
+_cfg51_brace = _SC51.from_dict({"notify_on_connect_format": "已启动 {unknown} {} 100%"})
+assert _cfg51_brace.render_connect_notice() == "已启动 {unknown} {} 100%", \
+    _cfg51_brace.render_connect_notice()
+# 显示名留空 → {display_name} 回落默认显示名 MC，{server_name} 保留原始 ID
+_cfg51_label = _SC51.from_dict({
+    "server": {"server_name": "raw_name"},
+    "notify_on_connect_format": "[{display_name}|{server_name}] 已启动",
+})
+assert _cfg51_label.render_connect_notice() == "[MC|raw_name] 已启动", \
+    _cfg51_label.render_connect_notice()
+
+# (d) 连接回调：开关打开且配置目标会话 → 逐会话发送；开关关闭 / 无会话不发
+class _Ctx51:
+    def __init__(self):
+        self.sent = []
+
+    async def send_message(self, umo, chain):
+        self.sent.append((umo, chain.chain[0].text))
+        return True
+
+
+class _TL51:
+    def append(self, *a):
+        pass
+
+
+from astrbot_plugin_minecraft_queqiao.services.metrics import MetricsCollector as _MC51
+
+
+def _make_plugin51(configs, ctx):
+    pi = _m45.MinecraftQueQiaoPlugin.__new__(_m45.MinecraftQueQiaoPlugin)
+    pi._configs = configs
+    pi.context = ctx
+    pi.metrics = _MC51()
+    pi.terminal_logs = _TL51()
+    return pi
+
+
+_cfg51_on = _SC51.from_dict({
+    "notify_on_connect": True,
+    "notify_on_connect_format": "[{display_name}] 已启动",
+    "server": {"server_name": "S51", "display_name": "生存服"},
+    "target_sessions": ["umo:GroupMessage:1", "umo:GroupMessage:2"],
+})
+_ctx51 = _Ctx51()
+_pi51 = _make_plugin51({"S51": _cfg51_on}, _ctx51)
+asyncio.run(_pi51._make_connect_handler("S51")())
+assert _ctx51.sent == [
+    ("umo:GroupMessage:1", "[生存服] 已启动"),
+    ("umo:GroupMessage:2", "[生存服] 已启动"),
+], _ctx51.sent
+
+# 开关关闭：即使有目标会话也不发
+_ctx51_off = _Ctx51()
+_pi51_off = _make_plugin51({"S51": _SC51.from_dict({
+    "server": {"server_name": "S51"},
+    "target_sessions": ["umo:GroupMessage:1"],
+})}, _ctx51_off)
+asyncio.run(_pi51_off._make_connect_handler("S51")())
+assert _ctx51_off.sent == [], "关闭通知时不得发送"
+
+# 开关打开但未配置目标会话：不发
+_ctx51_no = _Ctx51()
+_pi51_no = _make_plugin51({"S51": _SC51.from_dict({
+    "notify_on_connect": True, "server": {"server_name": "S51"}})}, _ctx51_no)
+asyncio.run(_pi51_no._make_connect_handler("S51")())
+assert _ctx51_no.sent == [], "无目标会话时不得发送"
+
+# (e) 单个会话发送失败不影响其余会话，也不向连接回调抛异常
+class _Ctx51Fail(_Ctx51):
+    async def send_message(self, umo, chain):
+        if umo.endswith(":1"):
+            raise RuntimeError("boom")
+        return await super().send_message(umo, chain)
+
+
+_ctx51_fail = _Ctx51Fail()
+_pi51_fail = _make_plugin51({"S51": _cfg51_on}, _ctx51_fail)
+asyncio.run(_pi51_fail._make_connect_handler("S51")())
+assert _ctx51_fail.sent == [("umo:GroupMessage:2", "[生存服] 已启动")], _ctx51_fail.sent
+
+# (f) 连接失败通知：同一轮故障只回调第一条，重连成功后复位
+from astrbot_plugin_minecraft_queqiao.core.queqiao_client import (
+    QueQiaoClient as _QQC51,
+)
+_fail_calls51 = []
+
+
+async def _on_fail51(reason):
+    _fail_calls51.append(reason)
+
+
+_qc51 = _QQC51(_SC51.from_dict({"server": {"server_name": "S51f"}}),
+               on_connect_fail=_on_fail51)
+_qc51._running = True
+asyncio.run(_qc51._notify_failure("首次连接失败"))
+asyncio.run(_qc51._notify_failure("第 2 次重连失败"))
+assert _fail_calls51 == ["首次连接失败"], _fail_calls51
+# 重新连上后复位：下一轮故障重新通知
+asyncio.run(_qc51._on_established(None))
+assert _qc51._fail_notified is False, "重新连上后必须复位去重标志"
+asyncio.run(_qc51._notify_failure("下一轮故障"))
+assert _fail_calls51 == ["首次连接失败", "下一轮故障"], _fail_calls51
+# 插件主动关闭 / 已停止不算故障，不通知
+_qc51._closing = True
+asyncio.run(_qc51._notify_failure("关闭中"))
+_qc51._closing = False
+_qc51._running = False
+asyncio.run(_qc51._notify_failure("已停止"))
+assert _fail_calls51 == ["首次连接失败", "下一轮故障"], _fail_calls51
+
+# 主插件失败回调：按「连接失败通知」开关与文案发送；关闭时不发
+_cfg51_fail = _SC51.from_dict({
+    "notify_on_connect_fail": True,
+    "notify_on_connect_fail_format": "❌ {display_name} 掉线了",
+    "server": {"server_name": "S51", "display_name": "生存服"},
+    "target_sessions": ["umo:GroupMessage:1", "umo:GroupMessage:2"],
+})
+_ctx51_failnotify = _Ctx51()
+_pi51_failnotify = _make_plugin51({"S51": _cfg51_fail}, _ctx51_failnotify)
+asyncio.run(_pi51_failnotify._make_connect_fail_handler("S51")("ConnectionRefused"))
+assert _ctx51_failnotify.sent == [
+    ("umo:GroupMessage:1", "❌ 生存服 掉线了"),
+    ("umo:GroupMessage:2", "❌ 生存服 掉线了"),
+], _ctx51_failnotify.sent
+
+_ctx51_failoff = _Ctx51()
+_pi51_failoff = _make_plugin51({"S51": _SC51.from_dict({
+    "server": {"server_name": "S51"},
+    "target_sessions": ["umo:GroupMessage:1"],
+})}, _ctx51_failoff)
+asyncio.run(_pi51_failoff._make_connect_fail_handler("S51")("boom"))
+assert _ctx51_failoff.sent == [], "关闭失败通知时不得发送"
+
+# 面板软更新：失败开关与文案即时生效（无需重建连接）
+_cfg51_failsoft = _SC51.from_dict({
+    "server": {"server_name": "S51"},
+    "target_sessions": ["umo:GroupMessage:9"],
+})
+_ctx51_failsoft = _Ctx51()
+_pi51_failsoft = _make_plugin51({"S51": _cfg51_failsoft}, _ctx51_failsoft)
+assert _pi51_failsoft.apply_soft_config(
+    "S51", {"notify_on_connect_fail": "true",
+            "notify_on_connect_fail_format": "{server_name} 掉线"}
+) is True
+assert _cfg51_failsoft.notify_on_connect_fail is True
+assert _cfg51_failsoft.render_connect_fail_notice() == "S51 掉线", \
+    _cfg51_failsoft.render_connect_fail_notice()
+asyncio.run(_pi51_failsoft._make_connect_fail_handler("S51")("x"))
+assert _ctx51_failsoft.sent == [("umo:GroupMessage:9", "S51 掉线")], \
+    _ctx51_failsoft.sent
+
+# 反向模式：已建立连接断开 → 触发失败通知；重新连上后再次断开重新通知
+class _Ws51:
+    async def close(self, *a, **k):
+        pass
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+
+_fail_calls51r = []
+
+
+async def _on_fail51r(reason):
+    _fail_calls51r.append(reason)
+
+
+_qc51r = _QQC51(
+    _SC51.from_dict({"server": {"server_name": "S51r", "ws_mode": "reverse"}}),
+    on_connect_fail=_on_fail51r,
+)
+_qc51r._running = True
+asyncio.run(_qc51r.attach_reverse_connection(_Ws51()))
+assert _fail_calls51r == ["鹊桥连接已断开"], _fail_calls51r
+asyncio.run(_qc51r.attach_reverse_connection(_Ws51()))
+assert _fail_calls51r == ["鹊桥连接已断开", "鹊桥连接已断开"], _fail_calls51r
+
+# 正向模式初次连不上：真实重连循环里也只在第一次失败时通知
+import astrbot_plugin_minecraft_queqiao.core.queqiao_client as _qqmod51
+
+_fail_calls51f = []
+
+
+async def _on_fail51f(reason):
+    _fail_calls51f.append(reason)
+
+
+_qc51f = _QQC51(
+    _SC51.from_dict({"server": {"server_name": "S51fwd"}}),
+    on_connect_fail=_on_fail51f,
+)
+_attempts51f = []
+
+
+async def _backoff51f():
+    _attempts51f.append(1)
+    if len(_attempts51f) >= 3:
+        _qc51f._running = False
+
+
+_qc51f._backoff = _backoff51f
+_orig_connect51 = _qqmod51.websockets.connect
+
+
+def _refused51(*a, **k):
+    raise OSError("Connection refused")
+
+
+_qqmod51.websockets.connect = _refused51
+try:
+    asyncio.run(_qc51f.start())
+finally:
+    _qqmod51.websockets.connect = _orig_connect51
+assert len(_attempts51f) == 3, _attempts51f
+assert _fail_calls51f == ["Connection refused"], _fail_calls51f
+
+# ServerInstance 把 on_connect_fail 正确透传给底层客户端
+from astrbot_plugin_minecraft_queqiao.core.server_manager import (
+    ServerInstance as _SI51,
+)
+_inst_fail51 = []
+
+
+async def _inst_on_fail51(reason):
+    _inst_fail51.append(reason)
+
+
+_si51 = _SI51(
+    _SC51.from_dict({"server": {"server_name": "S51i"}}),
+    on_connect_fail=_inst_on_fail51,
+)
+assert _si51.client.on_connect_fail is not None
+_si51.client._running = True
+asyncio.run(_si51.client._notify_failure("instance-wiring"))
+assert _inst_fail51 == ["instance-wiring"], _inst_fail51
+
+# (g) 面板软更新：开关与文案模板即时生效（无需重建连接）
+_cfg51_soft = _SC51.from_dict({
+    "server": {"server_name": "S51"},
+    "target_sessions": ["umo:GroupMessage:9"],
+})
+_ctx51_soft = _Ctx51()
+_pi51_soft = _make_plugin51({"S51": _cfg51_soft}, _ctx51_soft)
+assert _pi51_soft.apply_soft_config(
+    "S51", {"notify_on_connect": True, "notify_on_connect_format": "{server_name} 上线"}
+) is True
+assert _cfg51_soft.notify_on_connect is True
+assert _cfg51_soft.render_connect_notice() == "S51 上线", \
+    _cfg51_soft.render_connect_notice()
+asyncio.run(_pi51_soft._make_connect_handler("S51")())
+assert _ctx51_soft.sent == [("umo:GroupMessage:9", "S51 上线")], _ctx51_soft.sent
+
+# (h) schema 守卫：四项在模板项顶层、默认值与代码一致、hint 说明占位符
+_sh51 = json.loads(pathlib.Path(__file__).with_name("_conf_schema.json")
+                   .read_text(encoding="utf-8"))
+_items51 = _sh51["mc_servers"]["templates"]["server"]["items"]
+assert _items51["notify_on_connect"]["type"] == "bool"
+assert _items51["notify_on_connect"]["default"] is False
+assert _items51["notify_on_connect_format"]["type"] == "text", \
+    "多行文案在 AstrBot 配置页需用 text 类型渲染为多行输入框"
+assert _items51["notify_on_connect_format"]["default"] == _DCN51
+assert "多行" in _items51["notify_on_connect_format"]["hint"]
+assert "{display_name}" in _items51["notify_on_connect_format"]["hint"]
+assert _items51["notify_on_connect_fail"]["type"] == "bool"
+assert _items51["notify_on_connect_fail"]["default"] is False
+assert _items51["notify_on_connect_fail_format"]["type"] == "text", \
+    "多行文案在 AstrBot 配置页需用 text 类型渲染为多行输入框"
+assert _items51["notify_on_connect_fail_format"]["default"] == _DCNF51
+assert "多行" in _items51["notify_on_connect_fail_format"]["hint"]
+assert "{display_name}" in _items51["notify_on_connect_fail_format"]["hint"]
+assert "notify_on_connect" not in _items51["message"]["items"], \
+    "连通通知应落在模板项顶层，message 子对象内不得重复"
+assert "notify_on_connect_fail" not in _items51["message"]["items"], \
+    "连接失败通知应落在模板项顶层，message 子对象内不得重复"
+print("OK  默认关闭 / 模板渲染防异常 / 连接回调逐会话发送 / 失败隔离 / "
+      "同一轮故障只通知首次失败 / 软更新即时生效 / schema 同步")

@@ -77,6 +77,14 @@ ECHO_SUPPRESS_WINDOW = 5.0
 DEFAULT_CHAT_FORMAT = "[{display_name}]{player}: {message}"
 DEFAULT_BROADCAST_FORMAT = "[{platform}]{sender}: {message}"
 
+# 服务器连通通知（notify_on_connect）的默认文案：连接建立（含断线重连、
+# 插件热重载）时发往该服务器的目标会话。可用占位符 {display_name} / {server_name}
+DEFAULT_CONNECT_NOTIFY_FORMAT = "[{display_name}] 🟢 服务器已启动"
+
+# 连接失败通知（notify_on_connect_fail）的默认文案：同一轮故障只发第一条，
+# 重新连上后重置；覆盖初次连不上与已连接后断线
+DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT = "[{display_name}] 🔴 服务器连接失败"
+
 # 平台名称映射的默认值：自带 aiocqhttp=QQ 示例，开箱即用。
 # 用户在配置里删空该列表项即关闭改写（保留原始平台名）
 DEFAULT_PLATFORM_NAMES: dict[str, str] = {"aiocqhttp": "QQ"}

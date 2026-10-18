@@ -215,7 +215,7 @@ class QueQiaoClient:
     对外提供：
     - start() / stop()：连接生命周期（含自动重连）
     - call_api()：发请求并等待 echo 匹配的响应
-    - 三个回调：on_event / on_connect / on_disconnect
+    - 回调：on_event / on_connect / on_disconnect / on_reconnect / on_connect_fail
     """
 
     def __init__(
@@ -225,6 +225,7 @@ class QueQiaoClient:
         on_connect: Callable[[], Awaitable[None]] | None = None,
         on_disconnect: Callable[[str], Awaitable[None]] | None = None,
         on_reconnect: Callable[[int, str], Awaitable[None]] | None = None,
+        on_connect_fail: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self.config = config
         self.server_name = config.server_name
@@ -233,6 +234,17 @@ class QueQiaoClient:
         self.on_disconnect = on_disconnect
         # 重连调度回调（attempt, stage）：stage 为「退避/低频/上限」，供观测
         self.on_reconnect = on_reconnect
+        # 连接失败回调：同一轮故障（直到重新连上）只触发一次
+        self.on_connect_fail = on_connect_fail
+
+        self._ws: Any = None
+        self._connected = False
+        self._running = False
+        self._closing = False
+        self._retries = 0
+        # 本轮故障是否已通知：首次连不上 / 断线时置 True，重连成功时复位。
+        # 重连期间每次尝试都可能失败，逐次通知会刷屏，用户只需要第一条
+        self._fail_notified = False
 
         self._ws: Any = None
         self._connected = False
@@ -327,6 +339,7 @@ class QueQiaoClient:
                 raise
             except Exception as exc:
                 await self._on_lost(exc)
+                await self._notify_failure(str(exc))
                 if not self._should_retry(exc):
                     break
                 await self._backoff()
@@ -360,22 +373,29 @@ class QueQiaoClient:
         except Exception as exc:
             logger.warning(f"[{PLUGIN_NAME}][{self.server_name}] 反向 WS 连接异常: {exc}")
         finally:
+            drop_reason = ""
             if self._ws is websocket:
                 self._ws = None
                 if self._connected:
                     self._connected = False
-                    reason = "鹊桥连接已断开"
-                    self._last_disconnect_reason = reason
+                    drop_reason = "鹊桥连接已断开"
+                    self._last_disconnect_reason = drop_reason
                     if self.on_disconnect:
                         with contextlib.suppress(Exception):
-                            await self.on_disconnect(reason)
+                            await self.on_disconnect(drop_reason)
+            # 先清理未决请求与唤醒等待者，再做可能较慢的通知发送，
+            # 避免通知阻塞导致调用方继续挂起
             self._fail_pending("连接已断开")
             self._client_gone.set()
+            if drop_reason:
+                await self._notify_failure(drop_reason)
 
     async def _on_established(self, websocket: Any) -> None:
         self._ws = websocket
         self._connected = True
         self._retries = 0
+        # 已重新连上：下一轮故障重新通知
+        self._fail_notified = False
         logger.info(
             f"[{PLUGIN_NAME}][{self.server_name}] 已连接鹊桥 "
             f"({'反向' if self.config.is_reverse else self.config.ws_url})"
@@ -393,6 +413,20 @@ class QueQiaoClient:
             with contextlib.suppress(Exception):
                 await self.on_disconnect(reason)
         self._fail_pending("连接已断开")
+
+    async def _notify_failure(self, reason: str) -> None:
+        """触发一次连接失败回调；同一轮故障只触发第一条。
+
+        一轮故障定义为「从断开/首次连不上开始，直到重新连上为止」：
+        期间重连会反复失败，逐次通知只会刷屏，用户只需要第一条；
+        重新连上后由 `_on_established` 复位。插件主动 stop() 不算故障。
+        """
+        if not self._running or self._closing or self._fail_notified:
+            return
+        self._fail_notified = True
+        if self.on_connect_fail:
+            with contextlib.suppress(Exception):
+                await self.on_connect_fail(reason)
 
     def _should_retry(self, exc: Exception) -> bool:
         """判断异常是否值得重试（鉴权失败等致命错误不重试）。"""

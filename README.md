@@ -1,7 +1,7 @@
 <div align="center">
 <h1>Minecraft 鹊桥互通</h1>
 <p><strong>通过鹊桥模组连接 Minecraft 服务器，实现消息互通、图片互通、服务器管理与 AI 聊天</strong></p>
-<p><img alt="version" src="https://img.shields.io/badge/version-v0.6.5-blue"></p>
+<p><img alt="version" src="https://img.shields.io/badge/version-v0.6.6-blue"></p>
 <p><sub>Minecraft &nbsp;&nbsp; 我的世界 &nbsp;&nbsp; 鹊桥 &nbsp;&nbsp; 消息互联 &nbsp;&nbsp; 图片互通 &nbsp;&nbsp; AI聊天</sub></p>
 <p><strong>中文</strong> &nbsp;/&nbsp; <a href="README_en.md">English</a></p>
 </div>
@@ -13,6 +13,7 @@
 - **群服互通**：游戏内聊天与群消息双向转发；回复 Bot 转发的游戏消息时，转发进游戏的内容自动附 `@原玩家名`，游戏内一目了然是谁在群里回复
 - **图片互通**：群消息图片转发进游戏（需玩家安装 [ChatImage](https://github.com/kitUIN/ChatImage) 模组渲染）；游戏内图片 / 链接自动下载后发回群
 - **事件播报**：玩家进出 / 死亡 / 成就事件转发到指定会话（死亡与成就原版端与 Velocity 不支持）
+- **连通通知**：服务器连通 / 连接失败后向目标会话发送提示，文案可自定义
 - **服务器管理**：状态查询、在线玩家列表、远程指令执行
 - **Web 仪表盘**：查看各服务器状态、性能监控（TPS / 延迟）、互通终端实时日志与连接观测（重连次数 / 阶段 / 上限告警、API 超时计数），支持快捷广播与指令执行
 - **图床面板**：仪表盘顶部「🖼️ 图床」独立标签，直接管理图片转存——总开关、上传超时、图床条目增删改、内置 HTTP 服务运行态，内置测试图一键验证完整上传链
@@ -86,6 +87,7 @@
 
 - **AI 对话**（每台服务器独立）：启用 / 停用游戏内 AI 对话，以及触发前缀。前缀命中时该条聊天只走 AI、回复私聊给玩家，不再转发到群；留空 = 不触发 AI，普通聊天不受影响。保存后写入插件配置并即时生效（不重建连接），与 WebUI 里的 `enable_ai_chat` / `ai_chat_prefix` 是同一份配置
 - **消息转发**（每台服务器独立）：聊天 / 进出 / 死亡 / 成就转发开关、聊天消息格式（`{player}` `{message}` `{display_name}` 占位符）、群 → MC 触发前缀（留空 = 全部转发）与目标会话（每行一个 UMO）。与「消息转发配置」配置表是同一份配置，保存后即时生效（不重建连接）
+- **连接通知**（每台服务器独立）：服务器连通 / 连接失败后向目标会话发送通知，分别独立开关，通知文案格式均可用 `{display_name}` `{server_name}` 占位符；失败通知同一轮故障只发第一条。与「服务器连通通知」配置表是同一份配置，保存后即时生效（不重建连接）
 - **互通终端**（每台服务器独立）：终端日志加载天数（0～30，默认 2 = 今天 + 昨天，0 = 全部保留分片）。保存在插件配置条目顶层（与 WebUI 里的 `terminal_days` 是同一份配置），保存后即时生效（不重建连接）
 - 性能监控自身参数（启用、采集间隔、实时采集频率、数据保留、TPS 指令、延迟探测、默认展示）仍在监控面板右上角「⚙ 设置」弹窗里维护
 
@@ -150,6 +152,24 @@
 | `EMOJI_ROSE` | `63` | 🌹 |
 
 </details>
+
+### 服务器连通通知
+
+<details>
+<summary>展开配置表</summary>
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `notify_on_connect` | bool | `false` | 服务器连通后向目标会话发送「服务器已启动」通知；每次连接建立（含断线重连、插件重载后重新连上）都会发送 |
+| `notify_on_connect_format` | string | `[{display_name}] 🟢 服务器已启动` | 通知文案，支持多行输入与 `{display_name}` `{server_name}` 占位符；留空用默认文案 |
+| `notify_on_connect_fail` | bool | `false` | 初次连不上、已连接后断线时向目标会话发送「服务器连接失败」通知；同一轮故障只发第一条，重新连上后下一轮故障重新通知 |
+| `notify_on_connect_fail_format` | string | `[{display_name}] 🔴 服务器连接失败` | 失败通知文案，支持多行输入与 `{display_name}` `{server_name}` 占位符；留空用默认文案 |
+
+</details>
+
+开启「服务器连通通知」后，该服务器每次连通都会向它的**目标会话**发送一条通知；未配置目标会话时不发送。模板里只有 `{display_name}`（服务器显示名称）与 `{server_name}`（服务器名称）会被替换，其余花括号原样保留。
+
+开启「连接失败通知」后，服务器初次连不上或已连接后断线时会发送「服务器连接失败」通知，覆盖上述两种情况；同一次故障（直到重新连上）只发送第一条，不会随重连次数刷屏。反向模式下无法区分「服务器尚未启动」与「鹊桥尚未连入」，因此失败通知只在已建立的连接断开时发送。
 
 ### 图片转发到游戏内（ChatImage）
 
@@ -239,10 +259,10 @@
 |--------|----------|------|
 | `{player}` | `forward_chat_format` | 玩家名称 |
 | `{message}` | 两个格式串 | 消息内容 |
-| `{display_name}` | 两个格式串 | 服务器显示名称；留空时用 `display_name_default`（默认 `MC`），两者都留空才输出空串 |
+| `{display_name}` | 两个格式串、`notify_on_connect_format`、`notify_on_connect_fail_format` | 服务器显示名称；留空时用 `display_name_default`（默认 `MC`），两者都留空才输出空串 |
 | `{platform}` | `broadcast_format` | 平台名（可经 `platform_names` 映射，如 `aiocqhttp` → `QQ`） |
 | `{sender}` | `broadcast_format` | 发送者名 |
-| `{server_name}` | `broadcast_format` | 服务器名称（始终有值） |
+| `{server_name}` | `broadcast_format`、`notify_on_connect_format`、`notify_on_connect_fail_format` | 服务器名称（始终有值） |
 
 示例：`display_name` = `生存服`、格式 `[{display_name}] <{player}> {message}` → `[生存服] <Steve> 大家好`；什么都不填 → `[MC] <Steve> 大家好`。
 
