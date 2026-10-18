@@ -658,47 +658,6 @@
           }
         }
       },
-      "picui": {
-        "name": "picui",
-        "hint": "国内：免token",
-        "items": {
-          "enabled": {
-            "type": "bool",
-            "description": "启用此图床",
-            "default": true
-          },
-          "name": {
-            "type": "string",
-            "description": "显示名称（可空）",
-            "hint": "仅用于日志与界面辨识，留空则用上传接口地址的主机名",
-            "default": "picui"
-          },
-          "upload_url": {
-            "type": "string",
-            "description": "上传接口地址（完整 URL）",
-            "hint": "picui.cn 上传接口（Lsky 风格，游客可免 token 上传）",
-            "default": "https://picui.cn/api/v1/upload"
-          },
-          "token": {
-            "type": "string",
-            "description": "鉴权 Token（可空）",
-            "hint": "pngurl.com 用户在 https://pngurl.com/user/tokens 创建永久 token；访客上传开启时可留空。会作为 Authorization: Bearer 请求头并附带表单字段 token 发送",
-            "default": ""
-          },
-          "response": {
-            "type": "string",
-            "description": "响应解析方式",
-            "hint": "text = 响应正文就是图片链接；json = 取 JSON 响应中键名为 url 的字段（无则取第一个形如 http(s):// 的字段）",
-            "default": "json"
-          },
-          "headers": {
-            "type": "string",
-            "description": "自定义请求头（可空）",
-            "hint": "picui.cn 需要携带 Accept: application/json。一行一个「名字: 值」，也支持 JSON 对象格式；token 字段会自动发送 Authorization: Bearer，无需在此重复",
-            "default": "Accept: application/json"
-          }
-        }
-      },
       "anyapi": {
         "name": "anyapi",
         "hint": "国内（中转）：免token，≤10MB",

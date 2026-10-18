@@ -195,7 +195,7 @@ class DashboardApp {
     // 的 image_upload_services.templates 键集合对齐；后端模板接口未拉到时兜底）
     this.imageBedTemplateKeys = [
       'builtin_http', 'custom', 'catbox', 'litterbox', 'imglink', 'imgloc',
-      'img402', 'pngurl', 'see', 'imgbb', 'picui', 'anyapi', 'xinyew', 'xunjinlu',
+      'img402', 'pngurl', 'see', 'imgbb', 'anyapi', 'xinyew', 'xunjinlu',
     ];
   }
 

@@ -224,7 +224,6 @@ Pre-configured templates:
 | `imglink` | overseas | no | `json` | ≤25MB per image | anonymous direct upload; the server re-encodes images |
 | `img402.dev` | overseas | no | `json` | ≤10MB per image | file field is `image`; ≤1MB stored permanently, 1–10MB for 30 days |
 | `pngurl` | domestic | no | `json` | — | successor of pngcdn.cn |
-| `picui` | domestic | no | `json` | — | Lsky-style endpoint |
 | `anyapi` | domestic relay | no | `json` | suggested ≤10MB per file | anyapi relay proxy |
 | `xinyew` | domestic | no | `json` | — | 360 image bed |
 | `xunjinlu` | domestic | no | `json` | — | multi-endpoint aggregator that picks an upstream by file size |
@@ -234,6 +233,7 @@ Pre-configured templates:
 
 </details>
 
+- No `picui` template: it re-encodes every image to webp, which ChatImage cannot display; use the `custom` template and fill in the endpoint yourself if you still need one
 - Multiple enabled entries are **tried in list order**; the first success is broadcast into the game; when all fail, a warning aggregates each failure as `name: reason`
 - ⚠️ **Privacy notice**: group images are uploaded to the image bed — enable only when needed
 - ⚠️ **webp images may not show up**: rendering in game depends on ChatImage, which only supports png / jpg / jpeg / jfif / gif / ico / bmp and **does not support webp**. Images in chat are mostly png / jpg, but some image beds re-encode everything they host to webp; when the resulting link is webp the chat bar shows no picture (only the code text). “🧪 Test upload” sends a single PNG and reads the hosted image back to check its format: png / jpg and friends turn it green, while a product that became webp turns it yellow. A yellow result means the image bed re-encodes images to webp — switch to one that stores images as-is (such as `pngurl` or `img402.dev`)

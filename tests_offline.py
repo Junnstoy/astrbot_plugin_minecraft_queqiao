@@ -1443,16 +1443,20 @@ assert "公网" in _tpls28["builtin_http"]["hint"], \
 # 图壳服务已死）、sxcu.net（整站 Cloudflare JS 盾，非浏览器无法过）、
 # ctrlq/hostpic/unsee/fb.pics/freeimg/48pic/ooonline/52img 等
 # （DNS 失效或连接超时）已移除；pngcdn.cn 迁移到 pngurl.com 后实测访客
-# 上传可用，以 pngurl 模板恢复；picui / anyapi / xinyew / xunjinlu 均为
-# 用户提供、实测游客免 token 上传可用后新增；imglink / litterbox 为
+# 上传可用，以 pngurl 模板恢复；picui 虽上传可用，但实测会把任何图片
+# 一律转成 webp 输出（ChatImage 显示不出来），对本项目无意义，故移除模板；
+# anyapi / xinyew / xunjinlu 均为用户提供、实测游客免 token 上传可用后
+# 新增；imglink / litterbox 为
 # 实测匿名直传可用后新增（litterbox 端点须为 /resources/internals/api.php，
 # 文档常见的 /api/upload.php 已 404）
 assert set(_tpls28) == {
     "builtin_http", "custom", "catbox", "litterbox", "imglink",
     "imgloc", "img402", "pngurl",
-    "see", "imgbb", "picui", "anyapi", "xinyew", "xunjinlu",
+    "see", "imgbb", "anyapi", "xinyew", "xunjinlu",
 }, \
     f"图床模板应只保留实测可用者，实际 {list(_tpls28)}"
+assert "picui" not in _tpls28, \
+    "picui 只输出 webp（ChatImage 显示不出来），不应再提供模板"
 # hint 只讲两件事：如何添加 + 失败自动切换下一个
 assert "添加条目" in _bsrv28["hint"] and "下一个" in _bsrv28["hint"], \
     "hint 应说明添加方式与失败自动切换下一个图床"
@@ -1486,8 +1490,6 @@ _TPL_FIELDS28 = {
     # 改用 headers 配 Authorization；文件字段名是 smfile
     "see": _BASE_FIELDS28 - {"token"} | {"file_field", "headers"},
     "imgbb": _BASE_FIELDS28 | {"file_field"},
-    # picui：Lsky 风格接口，游客免 token，但必须带 Accept 头
-    "picui": _BASE_FIELDS28 | {"headers"},
     # anyapi / xinyew / xunjinlu：游客免 token，默认 file 字段，无额外请求头
     "anyapi": _BASE_FIELDS28,
     "xinyew": _BASE_FIELDS28,
@@ -1598,13 +1600,12 @@ assert _tpls28["imgbb"]["items"]["response"]["default"] == "json"
 assert _tpls28["imgbb"]["items"]["file_field"]["default"] == "image", \
     "imgbb 文件字段名是 image"
 assert _tpls28["imgbb"]["items"]["token"]["default"] == ""
-# picui：游客免 token、响应 json、必须预填 Accept 请求头（hint 里不提）
-assert _tpls28["picui"]["items"]["upload_url"]["default"] == \
-    "https://picui.cn/api/v1/upload"
-assert _tpls28["picui"]["items"]["response"]["default"] == "json"
-assert _tpls28["picui"]["items"]["headers"]["default"] == \
-    "Accept: application/json", "picui 必须预填 Accept 请求头"
-assert _tpls28["picui"]["items"]["token"]["default"] == ""
+# picui 模板已移除：前端兜底键列表也要同步去掉，否则模板接口拉取失败时
+# 下拉里又会冒出这个用不了的模板
+_js28 = (_pathlib.Path(__file__).resolve().parent
+         / "pages" / "dashboard" / "app.js").read_text(encoding="utf-8")
+_jskeys28 = _js28.split("imageBedTemplateKeys = [")[1].split("];")[0]
+assert "picui" not in _jskeys28, "前端兜底模板键列表不应残留 picui"
 # anyapi / xinyew / xunjinlu：游客免 token，默认 file 字段
 assert _tpls28["anyapi"]["items"]["upload_url"]["default"] == \
     "https://imageproxy.zhongzhuan.chat/api/upload"
