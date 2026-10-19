@@ -3352,7 +3352,8 @@ class DashboardApp {
     const notifyFormat = document.getElementById('st-notify-format');
     const notifyFailBox = document.getElementById('st-notify-fail');
     const notifyFailFormat = document.getElementById('st-notify-fail-format');
-    const notifyFocused = [notifyBox, notifyFormat, notifyFailBox, notifyFailFormat]
+    const notifyDelay = document.getElementById('st-notify-delay');
+    const notifyFocused = [notifyBox, notifyFormat, notifyFailBox, notifyFailFormat, notifyDelay]
       .some((el) => el && document.activeElement === el);
     if (!notifyFocused) {
       if (notifyBox) notifyBox.checked = !!(confItem && confItem.notify_on_connect);
@@ -3369,6 +3370,13 @@ class DashboardApp {
           && typeof confItem.notify_on_connect_fail_format === 'string'
           ? confItem.notify_on_connect_fail_format
           : '';
+      }
+      // 断连静默期（秒）：缺省 60
+      if (notifyDelay) {
+        const delayVal = confItem && Number.isFinite(confItem.connect_fail_notify_delay)
+          ? confItem.connect_fail_notify_delay
+          : 60;
+        notifyDelay.value = String(Math.max(0, Math.min(3600, delayVal)));
       }
     }
     // 消息转发配置（conf 的 message 子对象，缺省回落后端 _message_view 默认）：
@@ -3433,6 +3441,13 @@ class DashboardApp {
       this.showToast('互通终端加载天数需在 0-30 之间', 'error');
       return;
     }
+    const delayBox = document.getElementById('st-notify-delay');
+    const delayVal = parseInt(delayBox ? delayBox.value : '', 10);
+    // 断连静默期（0~3600 秒，0 = 断线立即通知）；后端会再钳制一次
+    if (!Number.isFinite(delayVal) || delayVal < 0 || delayVal > 3600) {
+      this.showToast('断连静默期需在 0-3600 秒之间', 'error');
+      return;
+    }
     const enabledBox = document.getElementById('st-ai-enabled');
     const prefixBox = document.getElementById('st-ai-prefix');
     const aiEnabled = !!(enabledBox && enabledBox.checked);
@@ -3475,6 +3490,8 @@ class DashboardApp {
         payload.notify_on_connect_fail = !!(notifyFailBox && notifyFailBox.checked);
         payload.notify_on_connect_fail_format =
           notifyFailFormat ? notifyFailFormat.value.trim() : '';
+        // 断连静默期（秒）：断线持续超过该时长仍未恢复才发通知，期间连回不通知
+        payload.connect_fail_notify_delay = delayVal;
         // 消息转发：显式提交全部值（面板展示的即当前生效值，覆盖语义）
         const msg = {};
         const fwdChat = document.getElementById('st-fwd-chat');

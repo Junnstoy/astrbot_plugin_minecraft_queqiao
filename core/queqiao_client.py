@@ -245,12 +245,10 @@ class QueQiaoClient:
         # 本轮故障是否已通知：首次连不上 / 断线时置 True，重连成功时复位。
         # 重连期间每次尝试都可能失败，逐次通知会刷屏，用户只需要第一条
         self._fail_notified = False
+        # 断连静默期计时任务：断线后先等 connect_fail_notify_delay 秒，
+        # 期间连回则取消（网络抖动/服务端卡顿不发通知），到期仍未恢复才上报
+        self._fail_notice_task: asyncio.Task | None = None
 
-        self._ws: Any = None
-        self._connected = False
-        self._running = False
-        self._closing = False
-        self._retries = 0
         # 连接层运行观测（只读，见 runtime_stats）：超时计数、最近重连阶段、
         # 是否达上限、最近断开原因。全部为观测性数据，不改动连接/重连语义
         self._api_timeouts = 0
@@ -308,6 +306,7 @@ class QueQiaoClient:
         self._running = False
         self._closing = True
         self._connected = False
+        self._cancel_fail_notice()
         self._client_gone.set()
 
         if self._shared_server is not None:
@@ -324,6 +323,7 @@ class QueQiaoClient:
     async def _run_forward(self) -> None:
         """正向模式：作为 Client 连接鹊桥的 WS Server。"""
         while self._running:
+            exc: Exception | None = None
             try:
                 async with websockets.connect(
                     self.config.ws_url,
@@ -337,12 +337,20 @@ class QueQiaoClient:
                         await self._dispatch(message)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                await self._on_lost(exc)
-                await self._notify_failure(str(exc))
-                if not self._should_retry(exc):
-                    break
-                await self._backoff()
+            except Exception as caught:
+                exc = caught
+
+            # 连接已结束：抛异常是异常断开，`async for` 正常返回则是对端发了
+            # close frame。后者以前被漏掉（`_connected` 一直为 True、未决请求
+            # 挂到超时，下一次握手失败还会被误记成断开原因），这里统一按断线处理
+            if not self._running:
+                break
+            if exc is None:
+                exc = ConnectionError("对端关闭了连接")
+            await self._on_lost(exc)
+            if not self._should_retry(exc):
+                break
+            await self._backoff()
 
         self._connected = False
         self._ws = None
@@ -357,12 +365,14 @@ class QueQiaoClient:
     async def attach_reverse_connection(self, websocket: Any) -> None:
         """反向模式：接住 SharedReverseServer 交付的连接。"""
         old = self._ws
+        # 先把自己登记为「当前连接」再关旧连接：旧连接的收尾逻辑据此判断
+        # 自己已被替换，既不误报断线，也不会清掉新连接的未决请求
+        self._ws = websocket
+        self._client_gone.clear()
         if old is not None and old is not websocket:
             with contextlib.suppress(Exception):
                 await old.close(1000, "Replaced by new connection")
 
-        self._ws = websocket
-        self._client_gone.clear()
         await self._on_established(websocket)
 
         try:
@@ -373,28 +383,30 @@ class QueQiaoClient:
         except Exception as exc:
             logger.warning(f"[{PLUGIN_NAME}][{self.server_name}] 反向 WS 连接异常: {exc}")
         finally:
-            drop_reason = ""
-            if self._ws is websocket:
-                self._ws = None
-                if self._connected:
-                    self._connected = False
-                    drop_reason = "鹊桥连接已断开"
-                    self._last_disconnect_reason = drop_reason
-                    if self.on_disconnect:
-                        with contextlib.suppress(Exception):
-                            await self.on_disconnect(drop_reason)
-            # 先清理未决请求与唤醒等待者，再做可能较慢的通知发送，
-            # 避免通知阻塞导致调用方继续挂起
-            self._fail_pending("连接已断开")
-            self._client_gone.set()
-            if drop_reason:
-                await self._notify_failure(drop_reason)
+            await self._finish_reverse_connection(websocket)
+
+    async def _finish_reverse_connection(self, websocket: Any) -> None:
+        """反向连接收尾：只有「当前连接」结束才算断线。
+
+        被新连接替换掉的旧连接直接返回——否则会误触发一次断开回调与失败通知，
+        并把新连接的未决请求判死（替换竞态）。
+        """
+        if self._ws is not websocket:
+            logger.debug(
+                f"[{PLUGIN_NAME}][{self.server_name}] 旧反向连接收尾"
+                "（已被新连接替换，忽略）"
+            )
+            return
+        self._ws = None
+        await self._on_lost(ConnectionError("鹊桥连接已断开"))
+        self._client_gone.set()
 
     async def _on_established(self, websocket: Any) -> None:
         self._ws = websocket
         self._connected = True
         self._retries = 0
-        # 已重新连上：下一轮故障重新通知
+        # 已重新连上：取消静默期计时（本轮抖动不通知），下一轮故障重新计时/通知
+        self._cancel_fail_notice()
         self._fail_notified = False
         logger.info(
             f"[{PLUGIN_NAME}][{self.server_name}] 已连接鹊桥 "
@@ -407,21 +419,67 @@ class QueQiaoClient:
     async def _on_lost(self, exc: Exception) -> None:
         was_connected = self._connected
         self._connected = False
-        reason = str(exc)
+        reason = str(exc) or exc.__class__.__name__
         self._last_disconnect_reason = reason
         if was_connected and self.on_disconnect:
             with contextlib.suppress(Exception):
                 await self.on_disconnect(reason)
         self._fail_pending("连接已断开")
+        await self._schedule_fail_notice(reason)
 
-    async def _notify_failure(self, reason: str) -> None:
+    async def _schedule_fail_notice(self, reason: str) -> None:
+        """断线后调度失败通知：静默期内连回则完全不报。
+
+        静默期（`connect_fail_notify_delay`）为 0 时立即上报，等价于旧行为（且与
+        重连共用同一协程，慢的会话发送会推迟重连）；大于 0 时放进独立任务，
+        既避免阻塞重连，也让短时抖动（服务端卡顿、插件重载）直接静默。
+        """
+        if not self._running or self._closing or self._fail_notified:
+            return
+        delay = max(0.0, float(self.config.connect_fail_notify_delay or 0))
+        if delay <= 0:
+            await self._notify_failure(reason)
+            return
+        if self._fail_notice_task is not None and not self._fail_notice_task.done():
+            return
+        self._fail_notice_task = asyncio.create_task(
+            self._fail_notice_after(delay, reason)
+        )
+
+    async def _fail_notice_after(self, delay: float, reason: str) -> None:
+        """静默期到期复查：期间已连回 / 已上报 / 已关闭则不通知。"""
+        await asyncio.sleep(delay)
+        if self._closing or self._connected or self._fail_notified:
+            return
+        # 主动停止时 `_running` 为 False；但重连次数耗尽（确定长期离线）
+        # 仍应上报，否则配了 max_reconnect 的用户断到上限后永远收不到通知
+        if not self._running and not self._reconnect_exhausted:
+            return
+        logger.warning(
+            f"[{PLUGIN_NAME}][{self.server_name}] 断连已持续 {delay:g} 秒仍未恢复，"
+            f"上报连接失败: {reason}"
+        )
+        await self._notify_failure(reason, force=True)
+
+    def _cancel_fail_notice(self) -> None:
+        """取消静默期计时（已连回或主动关闭）。"""
+        task = self._fail_notice_task
+        self._fail_notice_task = None
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def _notify_failure(self, reason: str, *, force: bool = False) -> None:
         """触发一次连接失败回调；同一轮故障只触发第一条。
 
         一轮故障定义为「从断开/首次连不上开始，直到重新连上为止」：
         期间重连会反复失败，逐次通知只会刷屏，用户只需要第一条；
         重新连上后由 `_on_established` 复位。插件主动 stop() 不算故障。
+        `force` 用于重连已放弃（耗尽上限）的场景：此时 `_running` 已为 False，
+        但故障是确定且长期的，仍应上报。
         """
-        if not self._running or self._closing or self._fail_notified:
+        if not force and (not self._running or self._closing):
+            return
+        if self._fail_notified:
             return
         self._fail_notified = True
         if self.on_connect_fail:

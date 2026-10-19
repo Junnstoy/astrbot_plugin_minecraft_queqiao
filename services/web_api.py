@@ -16,8 +16,11 @@ from typing import TYPE_CHECKING, Any
 from astrbot.api import logger
 
 from ..core.constants import (
+    CONNECT_FAIL_NOTIFY_DELAY_MAX,
+    CONNECT_FAIL_NOTIFY_DELAY_MIN,
     DEFAULT_CHAT_FORMAT,
     DEFAULT_CLIENT_ORIGIN,
+    DEFAULT_CONNECT_FAIL_NOTIFY_DELAY,
     DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
     DEFAULT_CONNECT_NOTIFY_FORMAT,
     DEFAULT_IMAGE_UPLOAD_TIMEOUT,
@@ -1238,6 +1241,13 @@ class WebApiController:
                         entry.get("notify_on_connect_fail_format")
                         or DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT
                     ),
+                    # 断连静默期（秒）：断线持续超过该时长仍未恢复才发通知
+                    "connect_fail_notify_delay": _as_int_clamped(
+                        entry.get("connect_fail_notify_delay"),
+                        DEFAULT_CONNECT_FAIL_NOTIFY_DELAY,
+                        CONNECT_FAIL_NOTIFY_DELAY_MIN,
+                        CONNECT_FAIL_NOTIFY_DELAY_MAX,
+                    ),
                     # 消息转发配置（面板「功能设置」读写）：message 子对象按
                     # ServerConfig.from_dict 同源读取，缺省值与 schema 默认一致
                     "message": self._message_view(entry),
@@ -1444,6 +1454,14 @@ class WebApiController:
             entry["notify_on_connect_fail_format"] = str(
                 payload.get("notify_on_connect_fail_format") or ""
             ).strip()
+        if "connect_fail_notify_delay" in payload:
+            # 断连静默期（秒，条目顶层）：0~3600 钳制，0=断线立即通知
+            entry["connect_fail_notify_delay"] = _as_int_clamped(
+                payload.get("connect_fail_notify_delay"),
+                DEFAULT_CONNECT_FAIL_NOTIFY_DELAY,
+                CONNECT_FAIL_NOTIFY_DELAY_MIN,
+                CONNECT_FAIL_NOTIFY_DELAY_MAX,
+            )
         # 消息转发配置（面板「功能设置」）：message 子对象按「显式出现」键
         # 合并，漏传不清空。字段名与 ServerConfig 属性 / main 层软更新键一致
         message_payload = payload.get("message")

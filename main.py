@@ -15,6 +15,8 @@ from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.star.filter.command import GreedyStr
 
 from .core.constants import (
+    CONNECT_FAIL_NOTIFY_DELAY_MAX,
+    CONNECT_FAIL_NOTIFY_DELAY_MIN,
     DEFAULT_IMAGE_HTTP_HOST,
     DEFAULT_IMAGE_HTTP_PORT,
     DEFAULT_IMAGE_UPLOAD_TIMEOUT,
@@ -215,6 +217,7 @@ class MinecraftQueQiaoPlugin(Star):
         "notify_on_connect_format",
         "notify_on_connect_fail",
         "notify_on_connect_fail_format",
+        "connect_fail_notify_delay",
     )
     # 布尔型软配置键 → (解析失败时的兜底默认值)，与 _conf_schema.json 默认一致
     _SOFT_BOOL_DEFAULTS = {
@@ -259,6 +262,15 @@ class MinecraftQueQiaoPlugin(Star):
                 # 互通终端加载天数（每台服务器独立）：0~30 钳制
                 config.terminal_days = max(
                     0, min(30, _to_int(fields.get(key), config.terminal_days))
+                )
+            elif key == "connect_fail_notify_delay":
+                # 断连静默期（秒，每台服务器独立）：0~3600 钳制
+                config.connect_fail_notify_delay = max(
+                    CONNECT_FAIL_NOTIFY_DELAY_MIN,
+                    min(
+                        CONNECT_FAIL_NOTIFY_DELAY_MAX,
+                        _to_int(fields.get(key), config.connect_fail_notify_delay),
+                    ),
                 )
             else:
                 setattr(config, key, str(fields.get(key) or "").strip())
@@ -452,8 +464,9 @@ class MinecraftQueQiaoPlugin(Star):
     async def _notify_server_fail(self, server_name: str) -> None:
         """连接失败时按配置向目标会话发送「连接失败」通知。
 
-        由 QueQiaoClient 保证同一轮故障只触发一次（重连期间不重复），
-        重新连上后下一轮故障会再次通知；开关关闭或未配置目标会话时跳过。
+        由 QueQiaoClient 保证：断连持续超过「断连静默期」仍未恢复才回调一次
+        （期间连回则完全不通知），同一轮故障只触发一次，重新连上后下一轮故障
+        会再次通知；开关关闭或未配置目标会话时跳过。
         """
         config = self._configs.get(server_name)
         if config is None or not config.notify_on_connect_fail:
@@ -529,9 +542,9 @@ class MinecraftQueQiaoPlugin(Star):
 
     def _make_connect_fail_handler(self, server_name: str):
         async def _handler(reason: str) -> None:
-            # 同一轮故障（直到重新连上）由 QueQiaoClient 去重，只在第一条失败
-            # 时回调；已连接后断线的终端记录由 disconnect 回调负责，这里不再
-            # 重复写同义终端行，只补日志并按配置发通知
+            # QueQiaoClient 侧已做两道收敛：断连静默期内连回不回调、同一轮
+            # 故障只回调一次；已连接后断线的终端记录由 disconnect 回调负责，
+            # 这里不再重复写同义终端行，只补日志并按配置发通知
             logger.warning(f"[{PLUGIN_NAME}][{server_name}] 连接失败: {reason}")
             await self._notify_server_fail(server_name)
 

@@ -85,6 +85,16 @@ DEFAULT_CONNECT_NOTIFY_FORMAT = "[{display_name}] 🟢 服务器已启动"
 # 重新连上后重置；覆盖初次连不上与已连接后断线
 DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT = "[{display_name}] 🔴 服务器连接失败"
 
+# 断连静默期（connect_fail_notify_delay，秒）：断线后须持续这么久仍未恢复才发
+# 失败通知，期间连回则完全静默（不发失败、也不发恢复），用于过滤网络抖动、
+# 服务端卡顿/重启加载、插件热重载造成的短时断连。
+# 60 秒的依据：实测这类抖动多在 5 秒内自愈，而 60 秒内退避重连会尝试约 5 次
+# （5/10/15/20/25 秒），全部失败才算「确定断开」；真实重启通常 1~3 分钟恢复。
+# 0 表示关闭静默期（断线立即通知，旧行为）
+DEFAULT_CONNECT_FAIL_NOTIFY_DELAY = 60
+CONNECT_FAIL_NOTIFY_DELAY_MIN = 0
+CONNECT_FAIL_NOTIFY_DELAY_MAX = 3600
+
 # 平台名称映射的默认值：自带 aiocqhttp=QQ 示例，开箱即用。
 # 用户在配置里删空该列表项即关闭改写（保留原始平台名）
 DEFAULT_PLATFORM_NAMES: dict[str, str] = {"aiocqhttp": "QQ"}

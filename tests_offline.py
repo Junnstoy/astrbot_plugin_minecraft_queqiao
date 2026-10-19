@@ -4533,6 +4533,7 @@ from astrbot_plugin_minecraft_queqiao.core.models_config import _to_bool as _to_
 from astrbot_plugin_minecraft_queqiao.core.constants import (
     DEFAULT_CONNECT_NOTIFY_FORMAT as _DCN44,
     DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT as _DCNF44,
+    DEFAULT_CONNECT_FAIL_NOTIFY_DELAY as _DCFND44,
 )
 
 _plugin44.SOFT_CONFIG_KEYS = (
@@ -4551,6 +4552,7 @@ _plugin44.SOFT_CONFIG_KEYS = (
     "notify_on_connect_format",
     "notify_on_connect_fail",
     "notify_on_connect_fail_format",
+    "connect_fail_notify_delay",
 )
 
 
@@ -4591,6 +4593,13 @@ def _apply_soft44(server_name, fields):
             except (TypeError, ValueError):
                 _td44 = int(getattr(cfg, _key, 2))
             setattr(cfg, _key, max(0, min(30, _td44)))
+        elif _key == "connect_fail_notify_delay":
+            # 断连静默期（秒）：0~3600 钳制，与 main.py 同口径
+            try:
+                _fd44 = int(str(fields.get(_key)).strip())
+            except (TypeError, ValueError):
+                _fd44 = int(getattr(cfg, _key, _DCFND44))
+            setattr(cfg, _key, max(0, min(3600, _fd44)))
         else:
             setattr(cfg, _key, str(fields.get(_key) or "").strip())
         applied = True
@@ -4770,6 +4779,35 @@ assert _plugin44.reloads == 0
 _it44f = asyncio.run(_wac44.get_config_servers())["data"]["servers"][0]
 assert _it44f["notify_on_connect_fail"] is True
 assert _it44f["notify_on_connect_fail_format"] == "{display_name} 连接失败"
+# 断连静默期（条目顶层整数秒）：列表缺省回显 60，保存后落盘 + 就地生效 + 钳制
+assert _it44d["connect_fail_notify_delay"] == _DCFND44, _it44d
+_set_payload44({"index": 0, "connect_fail_notify_delay": "90"})
+_resp44d = asyncio.run(_wac44.update_config_server())
+assert _resp44d["data"]["saved"] is True and _resp44d["data"]["reloaded"] is False, \
+    "断连静默期属软字段，不得热重载"
+assert _plugin44.config["mc_servers"][0]["connect_fail_notify_delay"] == 90
+assert _cfg44_run.connect_fail_notify_delay == 90, "运行时 ServerConfig 必须就地更新"
+_it44g = asyncio.run(_wac44.get_config_servers())["data"]["servers"][0]
+assert _it44g["connect_fail_notify_delay"] == 90, _it44g
+# 越界钳制到 0~3600；漏传不清空
+_set_payload44({"index": 0, "connect_fail_notify_delay": 99999})
+asyncio.run(_wac44.update_config_server())
+assert _plugin44.config["mc_servers"][0]["connect_fail_notify_delay"] == 3600
+assert _cfg44_run.connect_fail_notify_delay == 3600
+_set_payload44({"index": 0, "connect_fail_notify_delay": -10})
+asyncio.run(_wac44.update_config_server())
+assert _plugin44.config["mc_servers"][0]["connect_fail_notify_delay"] == 0
+assert _cfg44_run.connect_fail_notify_delay == 0
+_set_payload44({"index": 0, "enable_ai_chat": True})
+asyncio.run(_wac44.update_config_server())
+assert _plugin44.config["mc_servers"][0]["connect_fail_notify_delay"] == 0, \
+    "漏传该字段不得清空"
+assert _cfg44_run.connect_fail_notify_delay == 0
+assert _plugin44.reloads == 0, "全程不得热重载"
+# 复位成默认 60，避免影响后续断言
+_set_payload44({"index": 0, "connect_fail_notify_delay": _DCFND44})
+asyncio.run(_wac44.update_config_server())
+assert _cfg44_run.connect_fail_notify_delay == _DCFND44
 
 # 连接类字段（display_name / ws_url / enabled 等）仍走完整热重载
 _set_payload44({"index": 0, "enable_ai_chat": True, "display_name": "新名字"})
@@ -5946,6 +5984,9 @@ print("\n=== 51. 服务器连通通知（默认关闭 / 文案模板 / 连接回
 from astrbot_plugin_minecraft_queqiao.core.constants import (
     DEFAULT_CONNECT_NOTIFY_FORMAT as _DCN51,
     DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT as _DCNF51,
+    DEFAULT_CONNECT_FAIL_NOTIFY_DELAY as _DCFND51,
+    CONNECT_FAIL_NOTIFY_DELAY_MAX as _CFNDMAX51,
+    CONNECT_FAIL_NOTIFY_DELAY_MIN as _CFNDMIN51,
 )
 from astrbot_plugin_minecraft_queqiao.core.models_config import ServerConfig as _SC51
 
@@ -5961,6 +6002,17 @@ assert _cfg51_def.notify_on_connect_fail_format == _DCNF51
 assert _DCNF51 == "[{display_name}] 🔴 服务器连接失败", _DCNF51
 assert _cfg51_def.render_connect_fail_notice() == "[MC] 🔴 服务器连接失败", \
     _cfg51_def.render_connect_fail_notice()
+# 断连静默期：默认 60 秒，非法/越界值钳制到 0~3600
+assert _DCFND51 == 60, _DCFND51
+assert _cfg51_def.connect_fail_notify_delay == _DCFND51
+assert _SC51.from_dict({"connect_fail_notify_delay": "120"}).connect_fail_notify_delay == 120
+assert _SC51.from_dict({"connect_fail_notify_delay": -5}).connect_fail_notify_delay == _CFNDMIN51
+assert _SC51.from_dict(
+    {"connect_fail_notify_delay": 99999}
+).connect_fail_notify_delay == _CFNDMAX51
+assert _SC51.from_dict(
+    {"connect_fail_notify_delay": "abc"}
+).connect_fail_notify_delay == _DCFND51
 
 # (b2) 连接失败通知：独立开关（可与连通通知分开）+ 独立文案
 _cfg51_failon = _SC51.from_dict({
@@ -6161,7 +6213,11 @@ async def _on_fail51r(reason):
 
 
 _qc51r = _QQC51(
-    _SC51.from_dict({"server": {"server_name": "S51r", "ws_mode": "reverse"}}),
+    _SC51.from_dict({
+        "server": {"server_name": "S51r", "ws_mode": "reverse"},
+        # 静默期 0 = 断线立即上报（旧行为），便于逐次断言回调
+        "connect_fail_notify_delay": 0,
+    }),
     on_connect_fail=_on_fail51r,
 )
 _qc51r._running = True
@@ -6181,7 +6237,10 @@ async def _on_fail51f(reason):
 
 
 _qc51f = _QQC51(
-    _SC51.from_dict({"server": {"server_name": "S51fwd"}}),
+    _SC51.from_dict({
+        "server": {"server_name": "S51fwd"},
+        "connect_fail_notify_delay": 0,
+    }),
     on_connect_fail=_on_fail51f,
 )
 _attempts51f = []
@@ -6245,6 +6304,204 @@ assert _cfg51_soft.render_connect_notice() == "S51 上线", \
 asyncio.run(_pi51_soft._make_connect_handler("S51")())
 assert _ctx51_soft.sent == [("umo:GroupMessage:9", "S51 上线")], _ctx51_soft.sent
 
+# (i) 断连静默期：期间连回完全不通知（不发失败、也不发恢复），超时才报一次
+_deb_calls51 = []
+
+
+async def _on_fail_deb51(reason):
+    _deb_calls51.append(reason)
+
+
+async def _debounce51():
+    qc = _QQC51(
+        _SC51.from_dict({
+            "server": {"server_name": "S51deb"},
+            "connect_fail_notify_delay": 1,
+        }),
+        on_connect_fail=_on_fail_deb51,
+    )
+    qc._running = True
+    # 抖动：0.2 秒后连回 → 静默期内取消计时，过期也不得通知
+    await qc._on_lost(ConnectionError("抖动"))
+    await asyncio.sleep(0.2)
+    await qc._on_established(None)
+    await asyncio.sleep(1.1)
+    assert _deb_calls51 == [], f"静默期内连回不得通知: {_deb_calls51}"
+    # 真断：静默期内不得提前通知，到期后才报一次
+    await qc._on_lost(ConnectionError("真断"))
+    await asyncio.sleep(0.4)
+    assert _deb_calls51 == [], f"静默期内不得提前通知: {_deb_calls51}"
+    await asyncio.sleep(0.8)
+    assert _deb_calls51 == ["真断"], _deb_calls51
+    # 同一轮故障继续失败：不重复上报
+    await qc._on_lost(ConnectionError("真断 again"))
+    await asyncio.sleep(1.1)
+    assert _deb_calls51 == ["真断"], f"同一轮故障只报一次: {_deb_calls51}"
+    # 连回后下一轮重新计时、重新上报
+    await qc._on_established(None)
+    await qc._on_lost(ConnectionError("第二轮"))
+    await asyncio.sleep(1.1)
+    assert _deb_calls51 == ["真断", "第二轮"], _deb_calls51
+    # 主动 stop()：取消计时，之后不得再报
+    await qc._on_lost(ConnectionError("正在关闭"))
+    await qc.stop()
+    await asyncio.sleep(1.1)
+    assert _deb_calls51 == ["真断", "第二轮"], f"stop 后不得通知: {_deb_calls51}"
+    assert qc._fail_notice_task is None, "stop() 必须清空静默期计时任务"
+
+
+asyncio.run(_debounce51())
+
+# 静默期计时期间即使重连次数耗尽（_running=False）也仍应上报（确定长期离线）
+_exh_calls51 = []
+
+
+async def _on_fail_exh51(reason):
+    _exh_calls51.append(reason)
+
+
+async def _exhausted51():
+    qc = _QQC51(
+        _SC51.from_dict({
+            "server": {"server_name": "S51exh"},
+            "connect_fail_notify_delay": 1,
+        }),
+        on_connect_fail=_on_fail_exh51,
+    )
+    qc._running = True
+    await qc._on_lost(ConnectionError("已放弃"))
+    # 模拟重连耗尽：_backoff 达上限后置 _running=False 且 _reconnect_exhausted=True
+    qc._running = False
+    qc._reconnect_exhausted = True
+    await asyncio.sleep(1.1)
+    assert _exh_calls51 == ["已放弃"], f"重连耗尽仍须上报: {_exh_calls51}"
+
+
+asyncio.run(_exhausted51())
+
+# (j) 优雅关闭修复：对端正常 close frame 也按断线处理（旧实现会漏掉且挂住未决请求）
+class _Ws51Grace:
+    async def close(self, *a, **k):
+        pass
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+
+class _Ctx51Grace:
+    def __init__(self, ws):
+        self._ws = ws
+
+    async def __aenter__(self):
+        return self._ws
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+_disc_g51 = []
+_fail_g51 = []
+
+
+async def _on_disc_g51(reason):
+    _disc_g51.append(reason)
+
+
+async def _on_fail_g51(reason):
+    _fail_g51.append(reason)
+
+
+_qc51g = _QQC51(
+    _SC51.from_dict({
+        "server": {"server_name": "S51g"},
+        "connect_fail_notify_delay": 0,
+    }),
+    on_disconnect=_on_disc_g51,
+    on_connect_fail=_on_fail_g51,
+)
+_attempts_g51 = []
+
+
+async def _backoff_g51():
+    _attempts_g51.append(1)
+    _qc51g._running = False
+
+
+_qc51g._backoff = _backoff_g51
+_fut_g51 = None
+
+
+async def _run_g51():
+    global _fut_g51
+    _qc51g._running = True
+    _fut_g51 = asyncio.get_running_loop().create_future()
+    _qc51g._pending["echo-grace"] = _fut_g51
+    await _qc51g._run_forward()
+
+
+_orig_connect51g = _qqmod51.websockets.connect
+_qqmod51.websockets.connect = lambda *a, **k: _Ctx51Grace(_Ws51Grace())
+try:
+    asyncio.run(_run_g51())
+finally:
+    _qqmod51.websockets.connect = _orig_connect51g
+assert _fut_g51 is not None and _fut_g51.done(), "对端正常关闭后未决请求必须被清理"
+assert isinstance(_fut_g51.exception(), ConnectionError), _fut_g51.exception()
+assert _disc_g51 == ["对端关闭了连接"], _disc_g51
+assert _fail_g51 == ["对端关闭了连接"], _fail_g51
+assert _qc51g._connected is False and _qc51g._ws is None
+assert _qc51g._pending == {}, _qc51g._pending
+assert _attempts_g51 == [1], _attempts_g51
+
+# (k) 反向替换竞态：被新连接替换的旧连接收尾不得误判断开
+_disc_k51 = []
+_fail_k51 = []
+
+
+async def _on_disc_k51(reason):
+    _disc_k51.append(reason)
+
+
+async def _on_fail_k51(reason):
+    _fail_k51.append(reason)
+
+
+async def _replace_k51():
+    qc = _QQC51(
+        _SC51.from_dict({
+            "server": {"server_name": "S51k", "ws_mode": "reverse"},
+        }),
+        on_disconnect=_on_disc_k51,
+        on_connect_fail=_on_fail_k51,
+    )
+    qc._running = True
+    new_ws, old_ws = _Ws51(), _Ws51()
+    qc._ws = new_ws
+    qc._connected = True
+    fut = asyncio.get_running_loop().create_future()
+    qc._pending["echo-replace"] = fut
+    # 旧连接收尾：已被替换，必须完全忽略（不回调、不清未决请求、不唤醒等待者）
+    await qc._finish_reverse_connection(old_ws)
+    assert qc._connected is True, "旧连接收尾不得改动当前连接状态"
+    assert qc._pending.get("echo-replace") is fut, "旧连接收尾不得判死新连接的未决请求"
+    assert _disc_k51 == [] and _fail_k51 == []
+    assert qc._client_gone.is_set() is False
+    # 当前连接收尾：正常断线
+    await qc._finish_reverse_connection(new_ws)
+    assert qc._connected is False
+    assert qc._pending == {}
+    assert fut.done() and isinstance(fut.exception(), ConnectionError)
+    assert qc._client_gone.is_set() is True
+    assert _disc_k51 == ["鹊桥连接已断开"], _disc_k51
+    return qc
+
+
+_qc51k = asyncio.run(_replace_k51())
+assert _qc51k._last_disconnect_reason == "鹊桥连接已断开", _qc51k._last_disconnect_reason
+
 # (h) schema 守卫：四项在模板项顶层、默认值与代码一致、hint 说明占位符
 _sh51 = json.loads(pathlib.Path(__file__).with_name("_conf_schema.json")
                    .read_text(encoding="utf-8"))
@@ -6267,8 +6524,16 @@ assert "notify_on_connect" not in _items51["message"]["items"], \
     "连通通知应落在模板项顶层，message 子对象内不得重复"
 assert "notify_on_connect_fail" not in _items51["message"]["items"], \
     "连接失败通知应落在模板项顶层，message 子对象内不得重复"
+# 断连静默期：整数秒，默认 60，与代码默认一致，hint 说明 0=立即通知
+assert _items51["connect_fail_notify_delay"]["type"] == "integer"
+assert _items51["connect_fail_notify_delay"]["default"] == _DCFND51
+assert "秒" in _items51["connect_fail_notify_delay"]["hint"]
+assert "0" in _items51["connect_fail_notify_delay"]["hint"]
+assert "connect_fail_notify_delay" not in _items51["message"]["items"], \
+    "断连静默期应落在模板项顶层，message 子对象内不得重复"
 print("OK  默认关闭 / 模板渲染防异常 / 连接回调逐会话发送 / 失败隔离 / "
-      "同一轮故障只通知首次失败 / 软更新即时生效 / schema 同步")
+      "同一轮故障只通知首次失败 / 断连静默期（期间连回不通知）/ "
+      "优雅关闭按断线处理 / 反向替换不误报 / 软更新即时生效 / schema 同步")
 
 print("\n=== 52. 图床检测三色分级（PNG 探针 + 产物格式嗅探） ===")
 import pathlib as _pl52

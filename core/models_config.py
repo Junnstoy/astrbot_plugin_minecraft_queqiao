@@ -11,7 +11,10 @@ from .constants import (
     DEFAULT_BROADCAST_FORMAT,
     DEFAULT_CHAT_FORMAT,
     DEFAULT_CHATIMAGE_NAME,
+    CONNECT_FAIL_NOTIFY_DELAY_MAX,
+    CONNECT_FAIL_NOTIFY_DELAY_MIN,
     DEFAULT_CLIENT_ORIGIN,
+    DEFAULT_CONNECT_FAIL_NOTIFY_DELAY,
     DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
     DEFAULT_CONNECT_NOTIFY_FORMAT,
     DEFAULT_DISPLAY_NAME,
@@ -197,6 +200,9 @@ class ServerConfig:
     # 连上）只发第一条，避免重试期间刷屏
     notify_on_connect_fail: bool = False
     notify_on_connect_fail_format: str = DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT
+    # 断连静默期（秒）：断线持续超过该时长仍未恢复才发失败通知；期间连回
+    # 则完全静默（不发失败、也不发恢复）。0 = 断线立即通知
+    connect_fail_notify_delay: int = DEFAULT_CONNECT_FAIL_NOTIFY_DELAY
 
     # ---- 消息转发 ----
     forward_chat_to_astrbot: bool = True
@@ -480,6 +486,12 @@ class ServerConfig:
                 DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
             ).strip()
             or DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
+            connect_fail_notify_delay=_to_int_clamped(
+                data.get("connect_fail_notify_delay"),
+                DEFAULT_CONNECT_FAIL_NOTIFY_DELAY,
+                CONNECT_FAIL_NOTIFY_DELAY_MIN,
+                CONNECT_FAIL_NOTIFY_DELAY_MAX,
+            ),
             forward_chat_to_astrbot=_to_bool(message.get("forward_chat_to_astrbot"), True),
             forward_chat_format=_to_str(
                 message.get("forward_chat_format"), DEFAULT_CHAT_FORMAT
