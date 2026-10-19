@@ -24,12 +24,17 @@ from ..core.constants import (
     DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT,
     DEFAULT_CONNECT_NOTIFY_FORMAT,
     DEFAULT_IMAGE_UPLOAD_TIMEOUT,
+    DEFAULT_QUIET_HOURS_ENABLED,
+    DEFAULT_QUIET_HOURS_END,
+    DEFAULT_QUIET_HOURS_ITEMS,
+    DEFAULT_QUIET_HOURS_START,
     DEFAULT_REVERSE_HOST,
     DEFAULT_REVERSE_PATH,
     DEFAULT_REVERSE_PORT,
     DEFAULT_TERMINAL_DAYS,
     DEFAULT_WS_URL,
     PLUGIN_NAME,
+    QUIET_HOURS_ITEM_KEYS,
     TERMINAL_DAYS_MAX,
     TERMINAL_DAYS_MIN,
 )
@@ -101,6 +106,14 @@ def _as_str_list(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(item).strip() for item in value if str(item).strip()]
     return []
+
+
+def _quiet_items_view(value: Any) -> list[str]:
+    """免打扰项目回显：缺省（未配置）回落默认全选，脏数据只保留已知 key。"""
+    if value is None:
+        return list(DEFAULT_QUIET_HOURS_ITEMS)
+    selected = set(_as_str_list(value))
+    return [known for known in QUIET_HOURS_ITEM_KEYS if known in selected]
 
 
 def _schema_default(spec: Any) -> Any:
@@ -1248,6 +1261,19 @@ class WebApiController:
                         CONNECT_FAIL_NOTIFY_DELAY_MIN,
                         CONNECT_FAIL_NOTIFY_DELAY_MAX,
                     ),
+                    # 免打扰（安静时段）：时段 + 静音的消息类型（条目顶层）
+                    "quiet_hours_enabled": _as_bool(
+                        entry.get("quiet_hours_enabled"), DEFAULT_QUIET_HOURS_ENABLED
+                    ),
+                    "quiet_hours_start": str(
+                        entry.get("quiet_hours_start") or DEFAULT_QUIET_HOURS_START
+                    ),
+                    "quiet_hours_end": str(
+                        entry.get("quiet_hours_end") or DEFAULT_QUIET_HOURS_END
+                    ),
+                    "quiet_hours_items": _quiet_items_view(
+                        entry.get("quiet_hours_items")
+                    ),
                     # 消息转发配置（面板「功能设置」读写）：message 子对象按
                     # ServerConfig.from_dict 同源读取，缺省值与 schema 默认一致
                     "message": self._message_view(entry),
@@ -1462,6 +1488,27 @@ class WebApiController:
                 CONNECT_FAIL_NOTIFY_DELAY_MIN,
                 CONNECT_FAIL_NOTIFY_DELAY_MAX,
             )
+        # 免打扰（条目顶层）：开关 + 时段 + 项目多选
+        if "quiet_hours_enabled" in payload:
+            entry["quiet_hours_enabled"] = _as_bool(
+                payload.get("quiet_hours_enabled"), DEFAULT_QUIET_HOURS_ENABLED
+            )
+        if "quiet_hours_start" in payload:
+            entry["quiet_hours_start"] = (
+                str(payload.get("quiet_hours_start") or "").strip()
+                or DEFAULT_QUIET_HOURS_START
+            )
+        if "quiet_hours_end" in payload:
+            entry["quiet_hours_end"] = (
+                str(payload.get("quiet_hours_end") or "").strip()
+                or DEFAULT_QUIET_HOURS_END
+            )
+        if "quiet_hours_items" in payload:
+            # 只保留已知 key 并固定顺序，避免手写脏数据进配置
+            selected = set(_as_str_list(payload.get("quiet_hours_items")))
+            entry["quiet_hours_items"] = [
+                known for known in QUIET_HOURS_ITEM_KEYS if known in selected
+            ]
         # 消息转发配置（面板「功能设置」）：message 子对象按「显式出现」键
         # 合并，漏传不清空。字段名与 ServerConfig 属性 / main 层软更新键一致
         message_payload = payload.get("message")

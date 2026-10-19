@@ -95,6 +95,42 @@ DEFAULT_CONNECT_FAIL_NOTIFY_DELAY = 60
 CONNECT_FAIL_NOTIFY_DELAY_MIN = 0
 CONNECT_FAIL_NOTIFY_DELAY_MAX = 3600
 
+# ---- 免打扰（安静时段）----
+
+# 可被免打扰静音的消息类型：key 入库/入配置，label 供前端与文档使用。
+# 顺序即前端多选框顺序；新增项目时同步 pages/dashboard/index.html 的多选框
+QUIET_ITEM_CHAT = "chat"
+QUIET_ITEM_JOIN_LEAVE = "join_leave"
+QUIET_ITEM_DEATH = "death"
+QUIET_ITEM_ACHIEVEMENT = "achievement"
+QUIET_ITEM_CONNECT = "connect"
+QUIET_ITEM_CONNECT_FAIL = "connect_fail"
+QUIET_HOURS_ITEMS: tuple[tuple[str, str], ...] = (
+    (QUIET_ITEM_CHAT, "游戏聊天"),
+    (QUIET_ITEM_JOIN_LEAVE, "玩家进出"),
+    (QUIET_ITEM_DEATH, "死亡消息"),
+    (QUIET_ITEM_ACHIEVEMENT, "成就消息"),
+    (QUIET_ITEM_CONNECT, "连通通知"),
+    (QUIET_ITEM_CONNECT_FAIL, "连接失败通知"),
+)
+QUIET_HOURS_ITEM_KEYS: tuple[str, ...] = tuple(key for key, _ in QUIET_HOURS_ITEMS)
+
+# 免打扰默认关闭：时段落在深夜，开启即意味「夜里群里只剩聊天的声音」
+DEFAULT_QUIET_HOURS_ENABLED = False
+# 默认时段 23:00~08:00（跨零点）：按本地时间判断，起止相同视为未配置
+DEFAULT_QUIET_HOURS_START = "23:00"
+DEFAULT_QUIET_HOURS_END = "08:00"
+# 默认只勾通知类（死亡 / 成就 / 连通 / 失败）：聊天与玩家进出默认不静音，
+# 避免「一开免打扰就完全看不到群里在聊什么」，用户想全静音自己勾上即可
+DEFAULT_QUIET_HOURS_ITEMS: list[str] = [
+    QUIET_ITEM_DEATH,
+    QUIET_ITEM_ACHIEVEMENT,
+    QUIET_ITEM_CONNECT,
+    QUIET_ITEM_CONNECT_FAIL,
+]
+# "HH:MM" 的匹配式由 models_config 解析时使用，这里只放默认与范围说明
+QUIET_HOURS_TIME_PATTERN = r"^([01]?\d|2[0-3]):([0-5]\d)$"
+
 # 平台名称映射的默认值：自带 aiocqhttp=QQ 示例，开箱即用。
 # 用户在配置里删空该列表项即关闭改写（保留原始平台名）
 DEFAULT_PLATFORM_NAMES: dict[str, str] = {"aiocqhttp": "QQ"}

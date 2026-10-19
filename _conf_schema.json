@@ -127,7 +127,7 @@
           "notify_on_connect_fail": {
             "type": "bool",
             "description": "连接失败通知",
-            "hint": "初次连不上服务器、以及已连接后断线时，向「目标会话」发送一条「服务器连接失败」通知。断线后需持续超过「断连静默期」仍未恢复才发送，期间连回则不通知；同一轮故障只发第一条，重连成功后下一轮故障会重新通知；需先填写目标会话，反向模式仅在已建立的连接断开时通知。默认关闭",
+            "hint": "初次连不上服务器、以及已连接后断线时，向「目标会话」发送一条「服务器连接失败」通知。断线需超过「断连静默期」仍未恢复才发送，期间连回不通知；同一轮故障只发第一条。需先填写目标会话，默认关闭",
             "default": false
           },
           "notify_on_connect_fail_format": {
@@ -139,8 +139,54 @@
           "connect_fail_notify_delay": {
             "type": "integer",
             "description": "断连静默期（秒）",
-            "hint": "断线后持续超过该秒数仍未恢复，才发送「连接失败」通知；期间连回则完全不通知（网络抖动、服务端卡顿/重启加载、插件热重载都不再刷屏）。0~3600，0=断线立即通知（旧行为），默认 60",
+            "hint": "断线超过该秒数仍未恢复才发「连接失败」通知，期间连回则完全不通知。0 到 3600，0 = 断线立即通知，默认 60",
             "default": 60
+          },
+          "quiet_hours_enabled": {
+            "type": "bool",
+            "description": "启用免打扰",
+            "hint": "开启后，时段内只把勾选的消息类型静音（不发到目标会话）。默认关闭",
+            "default": false
+          },
+          "quiet_hours_start": {
+            "type": "string",
+            "description": "免打扰开始时间",
+            "hint": "24 小时制 HH:MM（AstrBot 本地时间），如 23:00；与结束时间相同视为未配置",
+            "default": "23:00"
+          },
+          "quiet_hours_end": {
+            "type": "string",
+            "description": "免打扰结束时间",
+            "hint": "24 小时制 HH:MM（AstrBot 本地时间）；早于开始时间表示跨零点",
+            "default": "08:00"
+          },
+          "quiet_hours_items": {
+            "type": "list",
+            "description": "免打扰项目",
+            "hint": "时段内静音哪些消息类型，勾选即生效；默认勾选死亡、成就、连通、连接失败四类通知",
+            "options": [
+              "chat",
+              "join_leave",
+              "death",
+              "achievement",
+              "connect",
+              "connect_fail"
+            ],
+            "labels": [
+              "游戏聊天",
+              "玩家进出",
+              "死亡消息",
+              "成就消息",
+              "连通通知",
+              "连接失败通知"
+            ],
+            "render_type": "checkbox",
+            "default": [
+              "death",
+              "achievement",
+              "connect",
+              "connect_fail"
+            ]
           },
           "text2image": {
             "type": "bool",

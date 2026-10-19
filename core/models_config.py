@@ -5,7 +5,9 @@ WebUI 配置值可能以字符串形式抵达（例如模板列表的输入框�
 """
 
 import json
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from .constants import (
     DEFAULT_BROADCAST_FORMAT,
@@ -24,6 +26,10 @@ from .constants import (
     DEFAULT_MONITOR_RETENTION_DAYS,
     DEFAULT_MONITOR_TPS_COMMAND,
     DEFAULT_PLATFORM_NAMES,
+    DEFAULT_QUIET_HOURS_ENABLED,
+    DEFAULT_QUIET_HOURS_END,
+    DEFAULT_QUIET_HOURS_ITEMS,
+    DEFAULT_QUIET_HOURS_START,
     DEFAULT_RECONNECT_INTERVAL,
     DEFAULT_REVERSE_HOST,
     DEFAULT_REVERSE_PORT,
@@ -32,6 +38,8 @@ from .constants import (
     DEFAULT_WS_URL,
     EMOJI_OK_GESTURE,
     MONITOR_MIN_INTERVAL,
+    QUIET_HOURS_ITEM_KEYS,
+    QUIET_HOURS_TIME_PATTERN,
 )
 
 WS_MODE_FORWARD = "forward"
@@ -111,6 +119,17 @@ def _to_list(value: object, default: list[str]) -> list[str]:
         parts = [part.strip() for part in stripped.split(",") if part.strip()]
         return parts if parts else list(default)
     return list(default)
+
+
+def _to_quiet_items(value: object) -> list[str]:
+    """解析免打扰项目：只保留已知 key，按 QUIET_HOURS_ITEMS 的固定顺序输出。
+
+    未知 key（手写配置写错、前端旧版本残留）一律丢弃；显式清空列表
+    表示「什么都不静音」，与未配置（回落默认全选）区分开。
+    """
+    raw = _to_list(value, DEFAULT_QUIET_HOURS_ITEMS)
+    selected = {item.strip() for item in raw if item.strip()}
+    return [key for key in QUIET_HOURS_ITEM_KEYS if key in selected]
 
 
 def _as_object(value: object) -> dict:
@@ -203,6 +222,14 @@ class ServerConfig:
     # 断连静默期（秒）：断线持续超过该时长仍未恢复才发失败通知；期间连回
     # 则完全静默（不发失败、也不发恢复）。0 = 断线立即通知
     connect_fail_notify_delay: int = DEFAULT_CONNECT_FAIL_NOTIFY_DELAY
+    # 免打扰（安静时段）：时段内静音 quiet_hours_items 里勾选的消息类型，
+    # 只影响「发到外部会话」这一步——终端日志与指标照常记录，不会丢事件
+    quiet_hours_enabled: bool = DEFAULT_QUIET_HOURS_ENABLED
+    quiet_hours_start: str = DEFAULT_QUIET_HOURS_START
+    quiet_hours_end: str = DEFAULT_QUIET_HOURS_END
+    quiet_hours_items: list[str] = field(
+        default_factory=lambda: list(DEFAULT_QUIET_HOURS_ITEMS)
+    )
 
     # ---- 消息转发 ----
     forward_chat_to_astrbot: bool = True
@@ -304,6 +331,42 @@ class ServerConfig:
             self._render_notice(self.notify_on_connect_fail_format)
             or DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT
         )
+
+    @staticmethod
+    def parse_hhmm(value: str) -> int | None:
+        """把 `HH:MM` 解析为当天分钟数；非法格式返回 None。"""
+        match = re.match(QUIET_HOURS_TIME_PATTERN, (value or "").strip())
+        if match is None:
+            return None
+        return int(match.group(1)) * 60 + int(match.group(2))
+
+    def quiet_window(self) -> tuple[int, int] | None:
+        """免打扰时段的 (起, 止) 分钟数；未启用或首尾相同/非法时返回 None。"""
+        if not self.quiet_hours_enabled:
+            return None
+        start = self.parse_hhmm(self.quiet_hours_start)
+        end = self.parse_hhmm(self.quiet_hours_end)
+        if start is None or end is None or start == end:
+            return None
+        return start, end
+
+    def is_quiet_now(self, now: datetime | None = None) -> bool:
+        """当前（AstrBot 进程本地时间）是否处于免打扰时段，支持 23:00~08:00 这类跨零点区间。"""
+        window = self.quiet_window()
+        if window is None:
+            return False
+        moment = now or datetime.now()
+        minutes = moment.hour * 60 + moment.minute
+        start, end = window
+        if start < end:
+            return start <= minutes < end
+        return minutes >= start or minutes < end
+
+    def quiet_suppresses(self, item: str, now: datetime | None = None) -> bool:
+        """该消息类型此刻是否应被免打扰静音（未勾选的项目不受时段影响）。"""
+        if item not in self.quiet_hours_items:
+            return False
+        return self.is_quiet_now(now)
 
     def platform_display_name(self, platform: str) -> str:
         """把原始平台名按用户映射转换为游戏内展示名；未命中时原样返回。
@@ -492,6 +555,16 @@ class ServerConfig:
                 CONNECT_FAIL_NOTIFY_DELAY_MIN,
                 CONNECT_FAIL_NOTIFY_DELAY_MAX,
             ),
+            quiet_hours_enabled=_to_bool(data.get("quiet_hours_enabled"), False),
+            quiet_hours_start=_to_str(
+                data.get("quiet_hours_start"), DEFAULT_QUIET_HOURS_START
+            ).strip()
+            or DEFAULT_QUIET_HOURS_START,
+            quiet_hours_end=_to_str(
+                data.get("quiet_hours_end"), DEFAULT_QUIET_HOURS_END
+            ).strip()
+            or DEFAULT_QUIET_HOURS_END,
+            quiet_hours_items=_to_quiet_items(data.get("quiet_hours_items")),
             forward_chat_to_astrbot=_to_bool(message.get("forward_chat_to_astrbot"), True),
             forward_chat_format=_to_str(
                 message.get("forward_chat_format"), DEFAULT_CHAT_FORMAT

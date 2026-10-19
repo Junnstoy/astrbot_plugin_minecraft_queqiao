@@ -13,7 +13,7 @@ Connects Minecraft servers to AstrBot through the [QueQiao](https://github.com/1
 - **Chat bridge**: two-way forwarding between in-game chat and group messages; replying to a game message forwarded by the bot automatically prepends `@原玩家名` (the original player name) in-game, so everyone sees who replied
 - **Image forwarding**: group images relayed into the game (players need the [ChatImage](https://github.com/kitUIN/ChatImage) mod installed to render them); in-game images / links are downloaded and sent back to the group
 - **Event broadcast**: player join / quit / death / achievement events forwarded to sessions (death & achievements unsupported on Vanilla/Velocity)
-- **Connection notification**: send a “server started” / “connection failed” notice to the target sessions when the server connects or fails to connect, with customizable templates
+- **Quiet hours**: give each server a silent window (e.g. `23:00`–`08:00`) that mutes the game message types and connection notices you pick, so nothing pings the group overnight
 - **Server management**: status queries, online player list, remote command execution
 - **Web Dashboard**: view server status, performance monitoring (TPS / latency), the bridge terminal in real time and connection observability (reconnect count / phase / limit alert, API timeout count), with quick broadcast and command console
 - **Image-bed panel**: a dedicated “🖼️ 图床” tab at the right end of the dashboard's server-tab bar to manage image transfer directly — the master switch, upload timeout, full add/edit/delete and reordering of image bed entries, the built-in HTTP service runtime state, and a one-click test upload that runs the whole chain with built-in probe images and colour-codes the result (green / yellow / red) by ChatImage compatibility
@@ -161,13 +161,31 @@ Common `mark_emoji_id` values:
 | `notify_on_connect_format` | string | `[{display_name}] 🟢 服务器已启动` | Multiline notice template; supports the `{display_name}` and `{server_name}` placeholders; empty uses the default template |
 | `notify_on_connect_fail` | bool | `false` | Send a “connection failed” notice to the target sessions when the first connection attempt fails or an established connection drops; the outage must last longer than the quiet period below, only the first failure of an outage is sent, and the next outage notifies again after a successful reconnect |
 | `notify_on_connect_fail_format` | string | `[{display_name}] 🔴 服务器连接失败` | Multiline failure notice template; supports the `{display_name}` and `{server_name}` placeholders; empty uses the default template |
-| `connect_fail_notify_delay` | int | `60` | Disconnect quiet period in seconds (`0`–`3600`): the “connection failed” notice is sent only when the outage outlasts it, and a reconnect within it stays completely silent (no failure and no recovery notice) — this filters network blips, server stalls/restart loading and plugin reloads; `0` notifies immediately on every drop |
+| `connect_fail_notify_delay` | int | `60` | Disconnect quiet period in seconds (`0`–`3600`): the failure notice is sent only when the outage outlasts it, and a reconnect within it stays silent; `0` notifies immediately |
 
 </details>
 
 With “server-connection notification” enabled, every connection of that server sends a notice to its **target sessions**; nothing is sent at all when no target session is configured. Only `{display_name}` (server display name) and `{server_name}` (server name) are replaced — any other braces are kept verbatim.
 
-With “connection-failure notification” enabled, a “connection failed” notice is sent both when the server has never been reachable and when an established connection drops; only the first message per outage (until the connection is re-established) is sent, so reconnect retries do not flood the chat. The notice also waits out the “disconnect quiet period” (`connect_fail_notify_delay`, 60 seconds by default): if the connection is back within it, nothing is sent at all (no failure and no recovery notice), and the notice only goes out when the outage outlasts it — short blips such as server stalls, restart loading or a plugin reload no longer ping the group; set the quiet period to `0` to be told the moment the connection drops. In reverse mode the plugin cannot tell “the server is not started yet” from “QueQiao has not dialled in yet”, so the failure notice is only sent when an established connection drops.
+With “connection-failure notification” enabled, a “connection failed” notice is sent both when the server has never been reachable and when an established connection drops; only the first message per outage (until the connection is re-established) is sent, so reconnect retries do not flood the chat. The notice also waits out the “disconnect quiet period” (`connect_fail_notify_delay`, 60 seconds by default): a reconnect within it sends nothing at all, and the notice only goes out when the outage outlasts it; set it to `0` to be told the moment the connection drops. In reverse mode the failure notice is only sent when an established connection drops.
+
+### Quiet hours
+
+When you would rather not have the group pinged by game activity overnight, give each server its own silent window (for example `23:00` – `08:00`). Inside the window only the message types you tick are muted.
+
+<details>
+<summary>Show options</summary>
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `quiet_hours_enabled` | bool | `false` | Enable the quiet window; off by default |
+| `quiet_hours_start` | string | `23:00` | Start time (AstrBot local time, `HH:MM`); equal start and end means “not configured” |
+| `quiet_hours_end` | string | `08:00` | End time (AstrBot local time, `HH:MM`); an end earlier than the start wraps past midnight |
+| `quiet_hours_items` | list | death/achievement/connect/failure notices | Which types are muted (checkbox multi-select): `chat` game chat, `join_leave` player join/quit, `death` death messages, `achievement` achievements, `connect` connection notices, `connect_fail` failure notices |
+
+</details>
+
+- Both the dashboard's “功能设置 → 🌙 免打扰” panel and the AstrBot plugin config page let you toggle it, pick the window and tick the types; saving takes effect immediately without reconnecting
 
 ### Relaying images into the game (ChatImage)
 

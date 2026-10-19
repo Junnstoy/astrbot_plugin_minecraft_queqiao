@@ -405,6 +405,11 @@ async def cmd_sub(
 - 回复 Bot 转发的游戏消息时，转发进游戏的内容自动反解原玩家名并前置 `@`：
   - 按 `forward_chat_format` 正向反解（默认 `[{display_name}]{player}: {message}`），优先匹配服务器 `display_name`
   - 非游戏消息、非法玩家名、空引用文本一律不加 `@`
+- 免打扰时段（`quiet_hours_*`）是**发送侧门禁**：`MessageBridge.forward_event()` 与
+  `main._notify_server_online` / `_notify_server_fail` 只在「发出去」这一步拦截，事件本身
+  照常写 metrics 与 terminal_logs（静音 ≠ 丢事件）。判断统一走
+  `ServerConfig.quiet_suppresses(item)`（`core/models_config.py`），项目 key 用
+  `core/constants.py` 的 `QUIET_ITEM_*`，禁止在业务代码里硬编码字符串
 - 鹊桥事件由 `QueQiaoClient` 分发到 `main._on_queqiao_event`，再按 `post_type` / 事件名分流（见 6.4）
 
 ### 6.4 鹊桥协议与连接层（改动连接层前必读）

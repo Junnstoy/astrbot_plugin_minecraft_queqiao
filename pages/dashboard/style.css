@@ -1185,6 +1185,54 @@ body {
   color: var(--mc-green-light, var(--mc-green));
 }
 
+/* 免打扰：时段输入并排，项目多选框整块横向排布（可换行） */
+.quiet-time-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quiet-time-range input[type='time'] {
+  width: 128px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input, var(--bg-tertiary));
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.quiet-time-sep {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.quiet-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.quiet-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.quiet-item input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--mc-green);
+  cursor: pointer;
+}
+
 /* 全局视图（无目标服务器）下 AI 组置灰只读：开关是每台服务器独立配置 */
 .settings-group.disabled .settings-row-control input {
   opacity: 0.5;

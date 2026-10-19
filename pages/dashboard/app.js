@@ -3379,6 +3379,32 @@ class DashboardApp {
         notifyDelay.value = String(Math.max(0, Math.min(3600, delayVal)));
       }
     }
+    // 免打扰（conf 条目顶层）：开关 + 时段 + 项目多选；任一时段/开关控件
+    // 正被编辑时整组不回写，避免打断输入
+    const quietBox = document.getElementById('st-quiet-enabled');
+    const quietStart = document.getElementById('st-quiet-start');
+    const quietEnd = document.getElementById('st-quiet-end');
+    const quietItemBoxes = Array.from(document.querySelectorAll('.st-quiet-item'));
+    const quietFocused = [quietBox, quietStart, quietEnd, ...quietItemBoxes]
+      .some((el) => el && document.activeElement === el);
+    if (!quietFocused) {
+      if (quietBox) quietBox.checked = !!(confItem && confItem.quiet_hours_enabled);
+      if (quietStart) {
+        quietStart.value = confItem && typeof confItem.quiet_hours_start === 'string'
+          ? confItem.quiet_hours_start
+          : '23:00';
+      }
+      if (quietEnd) {
+        quietEnd.value = confItem && typeof confItem.quiet_hours_end === 'string'
+          ? confItem.quiet_hours_end
+          : '08:00';
+      }
+      // 项目缺省（旧配置 / 后端未返回）= 只静音通知类，与 schema 默认一致
+      const quietSelected = Array.isArray(confItem && confItem.quiet_hours_items)
+        ? confItem.quiet_hours_items
+        : ['death', 'achievement', 'connect', 'connect_fail'];
+      for (const box of quietItemBoxes) box.checked = quietSelected.includes(box.value);
+    }
     // 消息转发配置（conf 的 message 子对象，缺省回落后端 _message_view 默认）：
     // 任一转发控件正被编辑时整组不回写，避免打断输入
     const fwdBoxes = {
@@ -3492,6 +3518,27 @@ class DashboardApp {
           notifyFailFormat ? notifyFailFormat.value.trim() : '';
         // 断连静默期（秒）：断线持续超过该时长仍未恢复才发通知，期间连回不通知
         payload.connect_fail_notify_delay = delayVal;
+        // 免打扰：开关 + 时段 + 项目（按多选框 value 收集，顺序由后端固定）。
+        // 时段起止相同等于没设，前端直接拦下，避免用户以为已生效
+        const quietEnabledBox = document.getElementById('st-quiet-enabled');
+        const quietStartBox = document.getElementById('st-quiet-start');
+        const quietEndBox = document.getElementById('st-quiet-end');
+        payload.quiet_hours_enabled = !!(quietEnabledBox && quietEnabledBox.checked);
+        payload.quiet_hours_start = quietStartBox ? quietStartBox.value : '';
+        payload.quiet_hours_end = quietEndBox ? quietEndBox.value : '';
+        payload.quiet_hours_items = Array.from(
+          document.querySelectorAll('.st-quiet-item:checked')
+        ).map((el) => el.value);
+        if (payload.quiet_hours_enabled) {
+          if (!payload.quiet_hours_start || !payload.quiet_hours_end) {
+            this.showToast('请填写免打扰时段的开始与结束时间', 'error');
+            return;
+          }
+          if (payload.quiet_hours_start === payload.quiet_hours_end) {
+            this.showToast('免打扰时段的开始与结束时间不能相同', 'error');
+            return;
+          }
+        }
         // 消息转发：显式提交全部值（面板展示的即当前生效值，覆盖语义）
         const msg = {};
         const fwdChat = document.getElementById('st-fwd-chat');

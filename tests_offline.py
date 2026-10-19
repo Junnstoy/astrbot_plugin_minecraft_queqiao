@@ -4534,6 +4534,10 @@ from astrbot_plugin_minecraft_queqiao.core.constants import (
     DEFAULT_CONNECT_NOTIFY_FORMAT as _DCN44,
     DEFAULT_CONNECT_FAIL_NOTIFY_FORMAT as _DCNF44,
     DEFAULT_CONNECT_FAIL_NOTIFY_DELAY as _DCFND44,
+    DEFAULT_QUIET_HOURS_END as _DQHE44,
+    DEFAULT_QUIET_HOURS_ITEMS as _DQHI44,
+    DEFAULT_QUIET_HOURS_START as _DQHS44,
+    QUIET_HOURS_ITEM_KEYS as _QIK44,
 )
 
 _plugin44.SOFT_CONFIG_KEYS = (
@@ -4553,6 +4557,10 @@ _plugin44.SOFT_CONFIG_KEYS = (
     "notify_on_connect_fail",
     "notify_on_connect_fail_format",
     "connect_fail_notify_delay",
+    "quiet_hours_enabled",
+    "quiet_hours_start",
+    "quiet_hours_end",
+    "quiet_hours_items",
 )
 
 
@@ -4570,6 +4578,7 @@ def _apply_soft44(server_name, fields):
         "forward_achievement_to_astrbot": False,
         "notify_on_connect": False,
         "notify_on_connect_fail": False,
+        "quiet_hours_enabled": False,
     }
     applied = False
     for _key in _plugin44.SOFT_CONFIG_KEYS:
@@ -4600,6 +4609,17 @@ def _apply_soft44(server_name, fields):
             except (TypeError, ValueError):
                 _fd44 = int(getattr(cfg, _key, _DCFND44))
             setattr(cfg, _key, max(0, min(3600, _fd44)))
+        elif _key in ("quiet_hours_start", "quiet_hours_end"):
+            # 免打扰时段：留空回落默认时刻，与 main.py apply_soft_config 同口径
+            _qb44 = _DQHS44 if _key == "quiet_hours_start" else _DQHE44
+            setattr(cfg, _key, str(fields.get(_key) or "").strip() or _qb44)
+        elif _key == "quiet_hours_items":
+            # 免打扰项目：只认已知 key、顺序固定；非列表不应用
+            _rawq44 = fields.get(_key)
+            if not isinstance(_rawq44, list):
+                continue
+            _selq44 = {str(x).strip() for x in _rawq44 if str(x).strip()}
+            cfg.quiet_hours_items = [k for k in _QIK44 if k in _selq44]
         else:
             setattr(cfg, _key, str(fields.get(_key) or "").strip())
         applied = True
@@ -4808,6 +4828,49 @@ assert _plugin44.reloads == 0, "全程不得热重载"
 _set_payload44({"index": 0, "connect_fail_notify_delay": _DCFND44})
 asyncio.run(_wac44.update_config_server())
 assert _cfg44_run.connect_fail_notify_delay == _DCFND44
+
+# 免打扰（条目顶层：开关 + 时段 + 项目多选）：软字段，保存即生效
+_it44q = asyncio.run(_wac44.get_config_servers())["data"]["servers"][0]
+assert _it44q["quiet_hours_enabled"] is False, "免打扰默认关闭"
+assert _it44q["quiet_hours_start"] == _DQHS44 and _it44q["quiet_hours_end"] == _DQHE44
+assert _it44q["quiet_hours_items"] == list(_DQHI44), _it44q["quiet_hours_items"]
+_set_payload44({
+    "index": 0,
+    "quiet_hours_enabled": True,
+    "quiet_hours_start": " 22:30 ",
+    "quiet_hours_end": "07:15",
+    "quiet_hours_items": ["death", "connect_fail", "unknown_key", "death"],
+})
+_resp44q = asyncio.run(_wac44.update_config_server())
+assert _resp44q["data"]["saved"] is True
+assert _resp44q["data"]["reloaded"] is False, "免打扰属软字段，不得热重载"
+_entry44q = _plugin44.config["mc_servers"][0]
+assert _entry44q["quiet_hours_enabled"] is True
+assert _entry44q["quiet_hours_start"] == "22:30", "时段需 strip"
+assert _entry44q["quiet_hours_items"] == ["death", "connect_fail"], \
+    "只保留已知 key、去重并按固定顺序"
+assert "quiet_hours_enabled" not in _entry44q["server"], "免打扰属条目顶层"
+assert _cfg44_run.quiet_hours_enabled is True, "运行时 ServerConfig 必须就地更新"
+assert _cfg44_run.quiet_hours_items == ["death", "connect_fail"]
+_it44q2 = asyncio.run(_wac44.get_config_servers())["data"]["servers"][0]
+assert _it44q2["quiet_hours_start"] == "22:30"
+assert _it44q2["quiet_hours_items"] == ["death", "connect_fail"]
+# 时段留空回落默认，避免运行期出现「静默期永不生效」
+_set_payload44({"index": 0, "quiet_hours_start": "", "quiet_hours_end": "  "})
+asyncio.run(_wac44.update_config_server())
+assert _plugin44.config["mc_servers"][0]["quiet_hours_start"] == _DQHS44
+assert _cfg44_run.quiet_hours_end == _DQHE44
+# 漏传不覆盖（合并语义）
+_set_payload44({"index": 0, "ai_chat_prefix": "ai"})
+asyncio.run(_wac44.update_config_server())
+assert _plugin44.config["mc_servers"][0]["quiet_hours_enabled"] is True, \
+    "漏传免打扰开关不得清空"
+assert _plugin44.reloads == 0, "免打扰全程不得热重载"
+# 复位，避免影响后续断言
+_set_payload44({"index": 0, "quiet_hours_enabled": False,
+                "quiet_hours_start": _DQHS44, "quiet_hours_end": _DQHE44})
+asyncio.run(_wac44.update_config_server())
+assert _cfg44_run.quiet_hours_enabled is False
 
 # 连接类字段（display_name / ws_url / enabled 等）仍走完整热重载
 _set_payload44({"index": 0, "enable_ai_chat": True, "display_name": "新名字"})
@@ -6738,3 +6801,246 @@ assert f"## {_ver52} (" in _chg52, f"CHANGELOG 缺少 {_ver52} 版本段"
 print("OK  探针图真伪(PNG·无 webp 探针) / 魔数嗅探(含 avif·未知) / URL 扩展名兜底 / "
       "ChatImage 支持清单 / 三档端到端(绿·黄·红·未知不误报) / 每条目只发一次 PNG / "
       "单条目同构 / 前端三色与 README 同步")
+
+print("\n=== 58. 免打扰（安静时段 + 项目多选框） ===")
+from datetime import datetime as _dt58, timedelta as _td58
+
+from astrbot_plugin_minecraft_queqiao.core.constants import (
+    DEFAULT_QUIET_HOURS_ENABLED as _DQHE_EN58,
+    DEFAULT_QUIET_HOURS_END as _DQHE58,
+    DEFAULT_QUIET_HOURS_ITEMS as _DQHI58,
+    DEFAULT_QUIET_HOURS_START as _DQHS58,
+    QUIET_HOURS_ITEM_KEYS as _QIK58,
+    QUIET_ITEM_ACHIEVEMENT as _QIA58,
+    QUIET_ITEM_CHAT as _QIC58,
+    QUIET_ITEM_CONNECT as _QICON58,
+    QUIET_ITEM_CONNECT_FAIL as _QICONF58,
+    QUIET_ITEM_DEATH as _QID58,
+    QUIET_ITEM_JOIN_LEAVE as _QIJL58,
+)
+
+# (a) 默认值：关闭 + 23:00~08:00 + 只静音通知类（与 schema 默认一致，第 22 组另查）
+_c58a = ServerConfig.from_dict({})
+assert _DQHE_EN58 is False
+assert _c58a.quiet_hours_enabled is False
+assert _c58a.quiet_hours_start == _DQHS58 == "23:00"
+assert _c58a.quiet_hours_end == _DQHE58 == "08:00"
+assert _QIK58 == ("chat", "join_leave", "death", "achievement", "connect", "connect_fail")
+assert _c58a.quiet_hours_items == list(_DQHI58) == list(_QIK58[2:]), \
+    "默认只勾通知类，聊天/进出默认不静音"
+assert _c58a.quiet_window() is None, "默认关闭时不应返回时段"
+
+# 字符串布尔 / 空白 strip / 逗号分隔与 JSON 列表 / 未知 key 丢弃 / 固定顺序
+_c58b = ServerConfig.from_dict({
+    "quiet_hours_enabled": "true",
+    "quiet_hours_start": " 22:30 ",
+    "quiet_hours_end": "6:05",
+    "quiet_hours_items": "connect_fail, death, bogus",
+})
+assert _c58b.quiet_hours_enabled is True
+assert _c58b.quiet_hours_start == "22:30" and _c58b.quiet_hours_end == "6:05"
+assert _c58b.quiet_hours_items == ["death", "connect_fail"], _c58b.quiet_hours_items
+_c58c = ServerConfig.from_dict({"quiet_hours_items": '["achievement","chat"]'})
+assert _c58c.quiet_hours_items == ["chat", "achievement"], "顺序必须按 QUIET_HOURS_ITEMS"
+_c58d = ServerConfig.from_dict({"quiet_hours_items": ["bogus"]})
+assert _c58d.quiet_hours_items == [], "全未知项目应清空"
+_c58e = ServerConfig.from_dict({"quiet_hours_items": []})
+assert _c58e.quiet_hours_items == [], "显式清空 = 什么都不静音"
+assert ServerConfig.from_dict({"quiet_hours_start": None}).quiet_hours_start == _DQHS58
+assert ServerConfig.from_dict({"quiet_hours_end": "   "}).quiet_hours_end == _DQHE58
+
+# (b) 时间解析与窗口判定
+assert ServerConfig.parse_hhmm("23:00") == 1380
+assert ServerConfig.parse_hhmm("7:30") == 450
+assert ServerConfig.parse_hhmm("00:00") == 0
+for _bad58 in ("25:00", "12:60", "abc", "", "12", "12:5", None):
+    assert ServerConfig.parse_hhmm(_bad58) is None, _bad58
+# 非跨零点 12:00~14:00
+_c58day = ServerConfig.from_dict({
+    "quiet_hours_enabled": True,
+    "quiet_hours_start": "12:00",
+    "quiet_hours_end": "14:00",
+})
+assert _c58day.quiet_window() == (720, 840)
+assert _c58day.is_quiet_now(_dt58(2026, 10, 19, 12, 0)) is True, "起点含"
+assert _c58day.is_quiet_now(_dt58(2026, 10, 19, 13, 59)) is True
+assert _c58day.is_quiet_now(_dt58(2026, 10, 19, 14, 0)) is False, "终点不含"
+assert _c58day.is_quiet_now(_dt58(2026, 10, 19, 11, 59)) is False
+# 跨零点 23:00~08:00
+_c58night = ServerConfig.from_dict({
+    "quiet_hours_enabled": "true",
+    "quiet_hours_start": "23:00",
+    "quiet_hours_end": "08:00",
+})
+assert _c58night.is_quiet_now(_dt58(2026, 10, 19, 23, 30)) is True
+assert _c58night.is_quiet_now(_dt58(2026, 10, 19, 0, 30)) is True
+assert _c58night.is_quiet_now(_dt58(2026, 10, 19, 7, 59)) is True
+assert _c58night.is_quiet_now(_dt58(2026, 10, 19, 8, 0)) is False
+assert _c58night.is_quiet_now(_dt58(2026, 10, 19, 22, 59)) is False
+# 关闭 / 起止相同 / 非法时间 = 永不静音（不静默失败，也不误伤全天）
+_c58off = ServerConfig.from_dict({"quiet_hours_enabled": False,
+                                  "quiet_hours_start": "00:00",
+                                  "quiet_hours_end": "23:59"})
+assert _c58off.is_quiet_now(_dt58(2026, 10, 19, 12, 0)) is False
+_c58same = ServerConfig.from_dict({"quiet_hours_enabled": True,
+                                   "quiet_hours_start": "08:00",
+                                   "quiet_hours_end": "08:00"})
+assert _c58same.quiet_window() is None and _c58same.is_quiet_now() is False, \
+    "起止相同视为未配置"
+_c58bad = ServerConfig.from_dict({"quiet_hours_enabled": True,
+                                  "quiet_hours_start": "25:00",
+                                  "quiet_hours_end": "08:00"})
+assert _c58bad.quiet_window() is None and _c58bad.is_quiet_now() is False
+
+# (c) quiet_suppresses：未勾选的类型不受时段影响
+_c58s = ServerConfig.from_dict({
+    "quiet_hours_enabled": True,
+    "quiet_hours_start": "12:00",
+    "quiet_hours_end": "14:00",
+    "quiet_hours_items": ["chat", "connect"],
+})
+_mid58 = _dt58(2026, 10, 19, 13, 0)
+assert _c58s.quiet_suppresses(_QIC58, _mid58) is True
+assert _c58s.quiet_suppresses(_QICON58, _mid58) is True
+assert _c58s.quiet_suppresses(_QID58, _mid58) is False, "未勾选的类型不得被静音"
+assert _c58s.is_quiet_now(_mid58) is True
+
+# (d) 事件 → 免打扰项目 key
+assert MessageBridge.quiet_item_for_event(chat) == _QIC58
+assert MessageBridge.quiet_item_for_event(join) == _QIJL58
+quit_ev58 = QueQiaoEvent.from_dict({"event_name": "PlayerQuitEvent",
+                                    "player": {"nickname": "Alice"}})
+assert MessageBridge.quiet_item_for_event(quit_ev58) == _QIJL58
+death_ev58 = QueQiaoEvent.from_dict({"event_name": "PlayerDeathEvent",
+                                     "player": {"nickname": "Alice"}})
+assert MessageBridge.quiet_item_for_event(death_ev58) == _QID58
+ach_ev58 = QueQiaoEvent.from_dict({"event_name": "PlayerAchievementEvent",
+                                   "player": {"nickname": "Alice"},
+                                   "title": "Stone Age"})
+assert MessageBridge.quiet_item_for_event(ach_ev58) == _QIA58
+assert MessageBridge.quiet_item_for_event(
+    QueQiaoEvent.from_dict({"event_name": "PlayerCommandEvent",
+                            "player": {"nickname": "Alice"}})) is None, \
+    "覆盖不到的事件不受免打扰影响"
+
+
+def _window58():
+    """构造一个覆盖「此刻」的时段，避免测试依赖具体执行时间。"""
+    _now = _dt58.now()
+    return (
+        (_now - _td58(hours=1)).strftime("%H:%M"),
+        (_now + _td58(hours=1)).strftime("%H:%M"),
+    )
+
+
+class _Ctx58:
+    def __init__(self):
+        self.sent = []
+
+    async def send_message(self, umo, chain):
+        self.sent.append(umo)
+        return True
+
+
+_ws58, _we58 = _window58()
+_cfgf58 = ServerConfig.from_dict({
+    "server": {"server_name": "S58"},
+    "quiet_hours_enabled": True,
+    "quiet_hours_start": _ws58,
+    "quiet_hours_end": _we58,
+    "quiet_hours_items": ["chat", "death", "join_leave"],
+    "message": {
+        "target_sessions": ["umo:GroupMessage:58"],
+        "forward_chat_to_astrbot": True,
+        "forward_death_to_astrbot": True,
+        "forward_join_leave_to_astrbot": True,
+    },
+})
+_br58 = MessageBridge(_Ctx58())
+_br58.register_server(_cfgf58)
+# 聊天 / 死亡 / 进出：时段内命中勾选类型 → 不转发（返回 False 且一条都没发）
+assert asyncio.run(_br58.forward_event("S58", _cfgf58, chat)) is False
+assert asyncio.run(_br58.forward_event("S58", _cfgf58, death_ev58)) is False
+assert asyncio.run(_br58.forward_event("S58", _cfgf58, join)) is False
+assert _br58.context.sent == [], "免打扰时段内不得发到任何会话"
+# 未勾选的类型（成就）照常转发
+_cfgf58.quiet_hours_items = ["chat"]
+assert asyncio.run(_br58.forward_event("S58", _cfgf58, death_ev58)) is True
+assert len(_br58.context.sent) == 1
+# 关闭免打扰 → 聊天恢复转发
+_cfgf58.quiet_hours_enabled = False
+assert asyncio.run(_br58.forward_event("S58", _cfgf58, chat)) is True
+assert len(_br58.context.sent) == 2
+
+# (e) 连接通知门禁（main._notify_server_online / _notify_server_fail）
+from astrbot_plugin_minecraft_queqiao.main import (
+    MinecraftQueQiaoPlugin as _P58,
+)
+
+_dum58 = _P58.__new__(_P58)
+_sent58 = []
+
+
+async def _fake_send58(config, text):
+    _sent58.append(text)
+    return 1
+
+
+_dum58._send_text_to_sessions = _fake_send58
+_cfgn58 = ServerConfig.from_dict({
+    "server": {"server_name": "S58n"},
+    "notify_on_connect": True,
+    "notify_on_connect_fail": True,
+    "quiet_hours_enabled": True,
+    "quiet_hours_start": _ws58,
+    "quiet_hours_end": _we58,
+    "quiet_hours_items": ["connect"],
+})
+_dum58._configs = {"S58n": _cfgn58}
+asyncio.run(_P58._notify_server_online(_dum58, "S58n"))
+assert _sent58 == [], "免打扰时段内连通通知应静音"
+asyncio.run(_P58._notify_server_fail(_dum58, "S58n"))
+assert len(_sent58) == 1, "连接失败通知未勾选，应照常发送"
+assert "🔴" in _sent58[0] and "连接失败" in _sent58[0], _sent58
+_cfgn58.quiet_hours_items = ["connect", "connect_fail"]
+asyncio.run(_P58._notify_server_fail(_dum58, "S58n"))
+assert len(_sent58) == 1, "勾选后连接失败通知同样静音"
+_cfgn58.quiet_hours_items = []
+asyncio.run(_P58._notify_server_online(_dum58, "S58n"))
+assert len(_sent58) == 2 and "🟢" in _sent58[1], "未勾选项目不得拦连通通知"
+# 开关关闭时依旧不发送（免打扰不改原有开关语义）
+_cfgn58.notify_on_connect = False
+asyncio.run(_P58._notify_server_online(_dum58, "S58n"))
+assert len(_sent58) == 2
+
+# (f) schema：4 个条目 + 类型/默认值/hint，且不得落进 message 子对象
+_schema58 = json.loads(
+    pathlib.Path(__file__).with_name("_conf_schema.json").read_text(encoding="utf-8")
+)
+_items58 = _schema58["mc_servers"]["templates"]["server"]["items"]
+for _k58, _t58 in (
+    ("quiet_hours_enabled", "bool"),
+    ("quiet_hours_start", "string"),
+    ("quiet_hours_end", "string"),
+    ("quiet_hours_items", "list"),
+):
+    assert _k58 in _items58, f"schema 缺少 {_k58}"
+    assert _items58[_k58]["type"] == _t58, f"{_k58} 类型错误"
+    assert _items58[_k58]["default"] == getattr(
+        ServerConfig.from_dict({}), _k58
+    ), f"{_k58} 默认值与代码不一致"
+    assert _items58[_k58]["hint"].strip(), f"{_k58} 缺少 hint"
+assert "quiet_hours_enabled" not in _items58["message"]["items"], \
+    "免打扰属条目顶层，不得落在 message 子对象"
+assert "23:00" in _items58["quiet_hours_start"]["hint"]
+assert _items58["quiet_hours_items"]["default"] == list(_DQHI58)
+# AstrBot 插件配置页据 render_type=checkbox + options/labels 渲染多选框，
+# 三者必须与 QUIET_HOURS_ITEMS 顺序一一对应，否则前端会串位
+_qitems58 = _items58["quiet_hours_items"]
+assert _qitems58.get("render_type") == "checkbox", _qitems58.get("render_type")
+assert _qitems58.get("options") == list(_QIK58), _qitems58.get("options")
+assert isinstance(_qitems58.get("labels"), list) and len(_qitems58["labels"]) == len(
+    _QIK58
+), _qitems58.get("labels")
+
+print("OK  默认值/解析/跨零点窗口/事件映射/转发门禁/通知门禁/schema 全部通过")

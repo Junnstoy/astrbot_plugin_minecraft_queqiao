@@ -323,8 +323,41 @@
             <span class="settings-row-control">
               <input type="number" id="st-notify-delay" min="0" max="3600" step="10" value="60" />
             </span>
-            <span class="settings-row-hint">断线后持续超过该秒数仍未恢复才发「连接失败」通知，期间连回则完全不通知（过滤网络抖动、服务端卡顿/重启加载、插件重载）。0~3600 秒，0 = 断线立即通知，默认 60</span>
+            <span class="settings-row-hint">断线超过该秒数仍未恢复才发「连接失败」通知，期间连回不通知。0 到 3600 秒，默认 60</span>
           </label>
+        </div>
+        <div class="settings-group" id="settings-group-quiet">
+          <div class="settings-group-head">
+            <span class="settings-group-title">🌙 免打扰</span>
+          </div>
+          <label class="settings-row">
+            <span class="settings-row-label">启用免打扰</span>
+            <span class="settings-row-control">
+              <input type="checkbox" id="st-quiet-enabled" />
+            </span>
+            <span class="settings-row-hint">开启后，时段内只静音勾选的消息类型。默认关闭</span>
+          </label>
+          <div class="settings-row">
+            <span class="settings-row-label">免打扰时段</span>
+            <span class="settings-row-control quiet-time-range">
+              <input type="time" id="st-quiet-start" value="23:00" />
+              <span class="quiet-time-sep">~</span>
+              <input type="time" id="st-quiet-end" value="08:00" />
+            </span>
+            <span class="settings-row-hint">按 AstrBot 本地时间；结束早于开始表示跨零点，首尾相同视为未配置</span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-row-label">免打扰项目</span>
+            <span class="settings-row-control quiet-items">
+              <label class="quiet-item"><input type="checkbox" class="st-quiet-item" value="chat" /> 游戏聊天</label>
+              <label class="quiet-item"><input type="checkbox" class="st-quiet-item" value="join_leave" /> 玩家进出</label>
+              <label class="quiet-item"><input type="checkbox" class="st-quiet-item" value="death" /> 死亡消息</label>
+              <label class="quiet-item"><input type="checkbox" class="st-quiet-item" value="achievement" /> 成就消息</label>
+              <label class="quiet-item"><input type="checkbox" class="st-quiet-item" value="connect" /> 连通通知</label>
+              <label class="quiet-item"><input type="checkbox" class="st-quiet-item" value="connect_fail" /> 连接失败通知</label>
+            </span>
+            <span class="settings-row-hint">时段内这些消息不再发到目标会话</span>
+          </div>
         </div>
         <div class="settings-group">
           <div class="settings-group-head">

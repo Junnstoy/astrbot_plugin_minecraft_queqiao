@@ -20,8 +20,13 @@ from .core.constants import (
     DEFAULT_IMAGE_HTTP_HOST,
     DEFAULT_IMAGE_HTTP_PORT,
     DEFAULT_IMAGE_UPLOAD_TIMEOUT,
+    DEFAULT_QUIET_HOURS_END,
+    DEFAULT_QUIET_HOURS_START,
     PLUGIN_DATA_DIR,
     PLUGIN_NAME,
+    QUIET_HOURS_ITEM_KEYS,
+    QUIET_ITEM_CONNECT,
+    QUIET_ITEM_CONNECT_FAIL,
     prefix_matches,
     strip_prefix,
 )
@@ -218,6 +223,10 @@ class MinecraftQueQiaoPlugin(Star):
         "notify_on_connect_fail",
         "notify_on_connect_fail_format",
         "connect_fail_notify_delay",
+        "quiet_hours_enabled",
+        "quiet_hours_start",
+        "quiet_hours_end",
+        "quiet_hours_items",
     )
     # 布尔型软配置键 → (解析失败时的兜底默认值)，与 _conf_schema.json 默认一致
     _SOFT_BOOL_DEFAULTS = {
@@ -231,6 +240,7 @@ class MinecraftQueQiaoPlugin(Star):
         "forward_image_from_mc": False,
         "notify_on_connect": False,
         "notify_on_connect_fail": False,
+        "quiet_hours_enabled": False,
     }
 
     def apply_soft_config(self, server_name: str, fields: dict) -> bool:
@@ -272,6 +282,25 @@ class MinecraftQueQiaoPlugin(Star):
                         _to_int(fields.get(key), config.connect_fail_notify_delay),
                     ),
                 )
+            elif key in ("quiet_hours_start", "quiet_hours_end"):
+                # 免打扰时段：留空回落到默认时刻，避免运行时出现「静默期永不生效」
+                fallback = (
+                    DEFAULT_QUIET_HOURS_START
+                    if key == "quiet_hours_start"
+                    else DEFAULT_QUIET_HOURS_END
+                )
+                setattr(config, key, _to_str(fields.get(key), fallback).strip() or fallback)
+            elif key == "quiet_hours_items":
+                # 免打扰项目：只认已知 key（其余丢弃），顺序固定；非列表不应用
+                raw_items = fields.get(key)
+                if not isinstance(raw_items, list):
+                    continue
+                selected = {
+                    str(item).strip() for item in raw_items if str(item).strip()
+                }
+                config.quiet_hours_items = [
+                    known for known in QUIET_HOURS_ITEM_KEYS if known in selected
+                ]
             else:
                 setattr(config, key, str(fields.get(key) or "").strip())
             applied = True
@@ -452,6 +481,9 @@ class MinecraftQueQiaoPlugin(Star):
         config = self._configs.get(server_name)
         if config is None or not config.notify_on_connect:
             return
+        # 免打扰时段：连通通知可单独静音（夜里重连不打扰）
+        if config.quiet_suppresses(QUIET_ITEM_CONNECT):
+            return
         sent = await self._send_text_to_sessions(
             config, config.render_connect_notice()
         )
@@ -470,6 +502,9 @@ class MinecraftQueQiaoPlugin(Star):
         """
         config = self._configs.get(server_name)
         if config is None or not config.notify_on_connect_fail:
+            return
+        # 免打扰时段：连接失败通知可单独静音
+        if config.quiet_suppresses(QUIET_ITEM_CONNECT_FAIL):
             return
         sent = await self._send_text_to_sessions(
             config, config.render_connect_fail_notice()

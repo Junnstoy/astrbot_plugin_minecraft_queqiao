@@ -26,6 +26,10 @@ from ..core.constants import (
     MARK_TEXT_OK,
     MAX_IMAGE_DOWNLOAD_BYTES,
     PLUGIN_NAME,
+    QUIET_ITEM_ACHIEVEMENT,
+    QUIET_ITEM_CHAT,
+    QUIET_ITEM_DEATH,
+    QUIET_ITEM_JOIN_LEAVE,
     prefix_matches,
     strip_prefix,
 )
@@ -331,6 +335,19 @@ class MessageBridge:
 
     # ---- MC → 外部 ----
 
+    @staticmethod
+    def quiet_item_for_event(event: QueQiaoEvent) -> str | None:
+        """事件对应的免打扰项目 key（覆盖不到的事件返回 None，不受免打扰影响）。"""
+        if event.is_chat:
+            return QUIET_ITEM_CHAT
+        if event.is_join or event.is_quit:
+            return QUIET_ITEM_JOIN_LEAVE
+        if event.is_death:
+            return QUIET_ITEM_DEATH
+        if event.is_achievement:
+            return QUIET_ITEM_ACHIEVEMENT
+        return None
+
     def should_forward(self, config: ServerConfig, event: QueQiaoEvent) -> bool:
         """依据事件类型与配置判断是否需要转发。"""
         if event.is_chat:
@@ -445,6 +462,15 @@ class MessageBridge:
 
         targets = config.target_sessions
         if not targets:
+            return False
+
+        # 免打扰时段：命中勾选类型时不发到外部会话。事件本身已在
+        # main._on_queqiao_event 里记入终端日志与指标，静音只拦「发出去」这一步
+        quiet_item = self.quiet_item_for_event(event)
+        if quiet_item is not None and config.quiet_suppresses(quiet_item):
+            logger.debug(
+                f"[{PLUGIN_NAME}][{server_name}] 免打扰时段，静音转发: {quiet_item}"
+            )
             return False
 
         # 聊天消息需先经过回声抑制：外部发到 MC 的内容会原样回传为聊天事件
