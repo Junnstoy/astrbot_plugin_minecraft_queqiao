@@ -157,15 +157,18 @@ Common `mark_emoji_id` values:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `notify_on_connect` | bool | `false` | Send a “server started” notice to the target sessions once the server connects; fires on every connection (including reconnects and after a plugin reload) |
+| `notify_on_connect` | bool | `false` | Send a “server started” notice to the target sessions once the server connects; only sent when the server really started, so a brief connection hiccup no longer raises a false alarm (see below) |
 | `notify_on_connect_format` | string | `[{display_name}] 🟢 服务器已启动` | Multiline notice template; supports the `{display_name}` and `{server_name}` placeholders; empty uses the default template |
 | `notify_on_connect_fail` | bool | `false` | Send a “connection failed” notice to the target sessions when the first connection attempt fails or an established connection drops; the outage must last longer than the quiet period below, only the first failure of an outage is sent, and the next outage notifies again after a successful reconnect |
 | `notify_on_connect_fail_format` | string | `[{display_name}] 🔴 服务器连接失败` | Multiline failure notice template; supports the `{display_name}` and `{server_name}` placeholders; empty uses the default template |
 | `connect_fail_notify_delay` | int | `60` | Disconnect quiet period in seconds (`0`–`3600`): the failure notice is sent only when the outage outlasts it, and a reconnect within it stays silent; `0` notifies immediately |
+| `slp_address` | string | empty | Server status probe address (e.g. `127.0.0.1:25565`; the port defaults to `25565`): while the bridge is down the plugin uses it to tell whether the server really stopped; empty falls back to outage length (a “server started” notice needs an outage longer than 30 seconds) |
 
 </details>
 
-With “server-connection notification” enabled, every connection of that server sends a notice to its **target sessions**; nothing is sent at all when no target session is configured. Only `{display_name}` (server display name) and `{server_name}` (server name) are replaced — any other braces are kept verbatim.
+With “server-connection notification” enabled, connecting that server sends a notice to its **target sessions**; nothing is sent at all when no target session is configured. Only `{display_name}` (server display name) and `{server_name}` (server name) are replaced — any other braces are kept verbatim.
+
+A “server started” notice is only sent when the server really started. Network hiccups, server lag and plugin reloads no longer raise false alarms: when the “server status probe address” (`slp_address`) is filled in, the plugin probes that address while the bridge is down — a server that still answers only lost its bridge (nothing is sent), while an unreachable one is treated as a real restart. When it is left empty the outage length decides: reconnects after more than 30 seconds count as a start, while hiccups that heal within seconds stay silent.
 
 With “connection-failure notification” enabled, a “connection failed” notice is sent both when the server has never been reachable and when an established connection drops; only the first message per outage (until the connection is re-established) is sent, so reconnect retries do not flood the chat. The notice also waits out the “disconnect quiet period” (`connect_fail_notify_delay`, 60 seconds by default): a reconnect within it sends nothing at all, and the notice only goes out when the outage outlasts it; set it to `0` to be told the moment the connection drops. In reverse mode the failure notice is only sent when an established connection drops.
 

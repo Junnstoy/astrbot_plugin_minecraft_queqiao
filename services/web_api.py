@@ -1261,6 +1261,8 @@ class WebApiController:
                         CONNECT_FAIL_NOTIFY_DELAY_MIN,
                         CONNECT_FAIL_NOTIFY_DELAY_MAX,
                     ),
+                    # 服务器状态探测地址：断线期间据此判断服务器是否真的停了
+                    "slp_address": str(entry.get("slp_address") or "").strip(),
                     # 免打扰（安静时段）：时段 + 静音的消息类型（条目顶层）
                     "quiet_hours_enabled": _as_bool(
                         entry.get("quiet_hours_enabled"), DEFAULT_QUIET_HOURS_ENABLED
@@ -1488,6 +1490,9 @@ class WebApiController:
                 CONNECT_FAIL_NOTIFY_DELAY_MIN,
                 CONNECT_FAIL_NOTIFY_DELAY_MAX,
             )
+        if "slp_address" in payload:
+            # 服务器状态探测地址（条目顶层）：留空 = 退回按断线时长判断
+            entry["slp_address"] = str(payload.get("slp_address") or "").strip()
         # 免打扰（条目顶层）：开关 + 时段 + 项目多选
         if "quiet_hours_enabled" in payload:
             entry["quiet_hours_enabled"] = _as_bool(

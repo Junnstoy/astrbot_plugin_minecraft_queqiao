@@ -26,6 +26,8 @@ import time
 import zlib
 from dataclasses import dataclass, field
 
+from ..core.constants import DEFAULT_SLP_PORT
+
 # 握手协议版本：-1 表示"未知"，服务端按当前版本兼容处理（免维护版本表）
 _PROTOCOL_VERSION = -1
 # 握手 next state=1：进入 status 阶段
@@ -231,3 +233,34 @@ def brand_from_slp(version_name: str, description: str = "") -> str | None:
         if brand in text:
             return brand
     return None
+
+
+def parse_host_port(
+    text: str, default_port: int = DEFAULT_SLP_PORT
+) -> tuple[str, int] | None:
+    """把用户填写的「host[:port]」解析为 (host, port)；空值或非法返回 None。
+
+    容忍复制粘贴带上的 scheme 与路径（``http://mc.example.com:25565/``），
+    IPv6 支持 ``[::1]:25565`` 与裸 ``::1`` 两种写法：裸 IPv6 的冒号无法与
+    端口分隔符区分，故只在整个字符串恰好一个冒号时才把后段当端口。
+    """
+    value = (text or "").strip()
+    if not value:
+        return None
+    if "//" in value:
+        value = value.split("//", 1)[1]
+    value = value.split("/", 1)[0].strip()
+    if not value:
+        return None
+    if value.startswith("["):
+        host, _, rest = value[1:].partition("]")
+        if not host:
+            return None
+        port_text = rest[1:] if rest.startswith(":") else ""
+        return host, int(port_text) if port_text.isdigit() else default_port
+    if value.count(":") == 1:
+        host, _, port_text = value.partition(":")
+        if not host:
+            return None
+        return host, int(port_text) if port_text.isdigit() else default_port
+    return value, default_port

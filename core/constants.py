@@ -95,6 +95,22 @@ DEFAULT_CONNECT_FAIL_NOTIFY_DELAY = 60
 CONNECT_FAIL_NOTIFY_DELAY_MIN = 0
 CONNECT_FAIL_NOTIFY_DELAY_MAX = 3600
 
+# ---- 连通通知的「真启动」判定 ----
+
+# 连通通知要表达的是「服务器启动了」，但鹊桥 WS 每次重连都会触发连接回调，
+# 网络抖动、服务端卡顿、插件热重载都会连带触发。断线期间对服务器**游戏端口**
+# 做 SLP 探测即可分辨：服务器仍在响应 = 只是隧道断了（抖动）；连不上 =
+# 服务器确实下线过（真启动）。探测不到结论时（如几秒内就连回）退回断线时长。
+DEFAULT_SLP_PORT = 25565
+# 单次探测超时：3 秒足够本机/局域网握手，又不会把重连后的判定拖太久
+CONNECT_NOTIFY_PROBE_TIMEOUT = 3.0
+# 探测间隔与上限：最多约 30 秒一轮；一旦探测到「连不上」立即锁定结论，不再复探
+CONNECT_NOTIFY_PROBE_INTERVAL = 5.0
+CONNECT_NOTIFY_PROBE_MAX = 6
+# 无探测结论时的兜底阈值：断线不足 30 秒一律视为抖动（实测 WS 抖动 <20 秒，
+# 而服务端真实重启从关服到 Done 通常 1~3 分钟）
+CONNECT_NOTIFY_MIN_DOWNTIME = 30.0
+
 # ---- 免打扰（安静时段）----
 
 # 可被免打扰静音的消息类型：key 入库/入配置，label 供前端与文档使用。

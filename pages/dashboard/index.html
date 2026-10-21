@@ -325,6 +325,13 @@
             </span>
             <span class="settings-row-hint">断线超过该秒数仍未恢复才发「连接失败」通知，期间连回不通知。0 到 3600 秒，默认 60</span>
           </label>
+          <label class="settings-row">
+            <span class="settings-row-label">状态探测地址</span>
+            <span class="settings-row-control">
+              <input type="text" id="st-notify-slp" placeholder="127.0.0.1:25565" autocomplete="off" spellcheck="false" />
+            </span>
+            <span class="settings-row-hint">服务器游戏端口地址（可省略端口，默认 25565）。断线期间用它判断服务器是否真的停了：服务器仍在响应说明只是连接断了，不发「服务器已启动」；留空则按断线时长判断（超过 30 秒才算启动）</span>
+          </label>
         </div>
         <div class="settings-group" id="settings-group-quiet">
           <div class="settings-group-head">

@@ -3353,7 +3353,8 @@ class DashboardApp {
     const notifyFailBox = document.getElementById('st-notify-fail');
     const notifyFailFormat = document.getElementById('st-notify-fail-format');
     const notifyDelay = document.getElementById('st-notify-delay');
-    const notifyFocused = [notifyBox, notifyFormat, notifyFailBox, notifyFailFormat, notifyDelay]
+    const notifySlp = document.getElementById('st-notify-slp');
+    const notifyFocused = [notifyBox, notifyFormat, notifyFailBox, notifyFailFormat, notifyDelay, notifySlp]
       .some((el) => el && document.activeElement === el);
     if (!notifyFocused) {
       if (notifyBox) notifyBox.checked = !!(confItem && confItem.notify_on_connect);
@@ -3377,6 +3378,12 @@ class DashboardApp {
           ? confItem.connect_fail_notify_delay
           : 60;
         notifyDelay.value = String(Math.max(0, Math.min(3600, delayVal)));
+      }
+      // 状态探测地址（host[:port]）：留空 = 退回按断线时长判断
+      if (notifySlp) {
+        notifySlp.value = confItem && typeof confItem.slp_address === 'string'
+          ? confItem.slp_address
+          : '';
       }
     }
     // 免打扰（conf 条目顶层）：开关 + 时段 + 项目多选；任一时段/开关控件
@@ -3518,6 +3525,9 @@ class DashboardApp {
           notifyFailFormat ? notifyFailFormat.value.trim() : '';
         // 断连静默期（秒）：断线持续超过该时长仍未恢复才发通知，期间连回不通知
         payload.connect_fail_notify_delay = delayVal;
+        // 状态探测地址（条目顶层）：留空 = 退回按断线时长判断真启动
+        const notifySlpBox = document.getElementById('st-notify-slp');
+        payload.slp_address = notifySlpBox ? notifySlpBox.value.trim() : '';
         // 免打扰：开关 + 时段 + 项目（按多选框 value 收集，顺序由后端固定）。
         // 时段起止相同等于没设，前端直接拦下，避免用户以为已生效
         const quietEnabledBox = document.getElementById('st-quiet-enabled');

@@ -222,6 +222,9 @@ class ServerConfig:
     # 断连静默期（秒）：断线持续超过该时长仍未恢复才发失败通知；期间连回
     # 则完全静默（不发失败、也不发恢复）。0 = 断线立即通知
     connect_fail_notify_delay: int = DEFAULT_CONNECT_FAIL_NOTIFY_DELAY
+    # 服务器状态探测地址 host[:port]：连通通知据此判断「服务器真的启动过」还是
+    # 「只是鹊桥断了」。留空则退回按断线时长判断（≥30 秒才算启动）
+    slp_address: str = ""
     # 免打扰（安静时段）：时段内静音 quiet_hours_items 里勾选的消息类型，
     # 只影响「发到外部会话」这一步——终端日志与指标照常记录，不会丢事件
     quiet_hours_enabled: bool = DEFAULT_QUIET_HOURS_ENABLED
@@ -555,6 +558,7 @@ class ServerConfig:
                 CONNECT_FAIL_NOTIFY_DELAY_MIN,
                 CONNECT_FAIL_NOTIFY_DELAY_MAX,
             ),
+            slp_address=_to_str(data.get("slp_address"), "").strip(),
             quiet_hours_enabled=_to_bool(data.get("quiet_hours_enabled"), False),
             quiet_hours_start=_to_str(
                 data.get("quiet_hours_start"), DEFAULT_QUIET_HOURS_START

@@ -4557,6 +4557,7 @@ _plugin44.SOFT_CONFIG_KEYS = (
     "notify_on_connect_fail",
     "notify_on_connect_fail_format",
     "connect_fail_notify_delay",
+    "slp_address",
     "quiet_hours_enabled",
     "quiet_hours_start",
     "quiet_hours_end",
@@ -4823,6 +4824,21 @@ asyncio.run(_wac44.update_config_server())
 assert _plugin44.config["mc_servers"][0]["connect_fail_notify_delay"] == 0, \
     "漏传该字段不得清空"
 assert _cfg44_run.connect_fail_notify_delay == 0
+# 状态探测地址（条目顶层字符串）：留空回显空串，保存后落盘 + 就地生效 + 不清空
+assert _it44d["slp_address"] == "", _it44d
+_set_payload44({"index": 0, "slp_address": " 127.0.0.1:25565 "})
+_resp44s = asyncio.run(_wac44.update_config_server())
+assert _resp44s["data"]["saved"] is True and _resp44s["data"]["reloaded"] is False, \
+    "状态探测地址属软字段，不得热重载"
+assert _plugin44.config["mc_servers"][0]["slp_address"] == "127.0.0.1:25565"
+assert _cfg44_run.slp_address == "127.0.0.1:25565", "运行时 ServerConfig 必须就地更新"
+_it44s = asyncio.run(_wac44.get_config_servers())["data"]["servers"][0]
+assert _it44s["slp_address"] == "127.0.0.1:25565", _it44s
+_set_payload44({"index": 0, "enable_ai_chat": True})
+asyncio.run(_wac44.update_config_server())
+assert _plugin44.config["mc_servers"][0]["slp_address"] == "127.0.0.1:25565", \
+    "漏传该字段不得清空"
+assert _cfg44_run.slp_address == "127.0.0.1:25565"
 assert _plugin44.reloads == 0, "全程不得热重载"
 # 复位成默认 60，避免影响后续断言
 _set_payload44({"index": 0, "connect_fail_notify_delay": _DCFND44})
@@ -7044,3 +7060,171 @@ assert isinstance(_qitems58.get("labels"), list) and len(_qitems58["labels"]) ==
 ), _qitems58.get("labels")
 
 print("OK  默认值/解析/跨零点窗口/事件映射/转发门禁/通知门禁/schema 全部通过")
+
+# ---- 第 59 组：连通通知的「真启动」判定（抖动不误报）----
+print("\n=== 59. 连通通知的真启动判定（抖动静默） ===")
+
+from astrbot_plugin_minecraft_queqiao.services import connect_watch as _cw59
+from astrbot_plugin_minecraft_queqiao.services.connect_watch import (
+    VERDICT_DOWNTIME as _VD59,
+    VERDICT_FIRST_CONNECT as _VF59,
+    VERDICT_SERVER_ALIVE as _VA59,
+    VERDICT_SERVER_DOWN as _VDN59,
+    ConnectWatch as _CW59,
+)
+from astrbot_plugin_minecraft_queqiao.services.slp_ping import (
+    parse_host_port as _php59,
+)
+
+# (a) 探测地址解析：容忍空白 / scheme / 路径 / 方括号 IPv6，非法返回 None
+assert _php59("") is None and _php59("   ") is None and _php59(":25565") is None
+assert _php59("127.0.0.1:25565") == ("127.0.0.1", 25565)
+assert _php59("  mc.example.com  ") == ("mc.example.com", 25565)
+assert _php59("http://mc.example.com:25570/") == ("mc.example.com", 25570)
+assert _php59("[::1]:25566") == ("::1", 25566)
+assert _php59("::1") == ("::1", 25565)
+assert _php59("host:abc") == ("host", 25565), "端口非数字应按默认端口处理"
+
+# (b) 未配置探测地址：首次连接算真启动，之后按断线时长（<30s 判抖动）
+_w59 = _CW59()
+assert _w59.verdict("s59") == (True, _VF59, 0.0), "首次连接应发通知"
+_w59.outage_started("s59", None)
+assert not _w59._tasks, "无探测地址时不得启动探测任务"
+_w59._lost_at["s59"] = _cw59.time.monotonic() - 5
+_real59, _basis59, _down59 = _w59.verdict("s59")
+assert _real59 is False and _basis59 == _VD59, "断线 5 秒应判为抖动"
+assert _down59 >= 5
+_w59.outage_started("s59", None)
+_w59._lost_at["s59"] = _cw59.time.monotonic() - 120
+_real59, _basis59, _down59 = _w59.verdict("s59")
+assert _real59 is True and _basis59 == _VD59 and _down59 >= 120, "断线超 30 秒应判为真启动"
+
+# (c) SLP 探测结论优先于时长：探到服务器仍在响应 → 抖动；探到连不上 → 真启动
+_orig_mcping59 = _cw59.mc_ping
+_orig_interval59 = _cw59.CONNECT_NOTIFY_PROBE_INTERVAL
+_cw59.CONNECT_NOTIFY_PROBE_INTERVAL = 0  # 测试内不等真实间隔
+
+
+async def _probe_alive59():
+    async def _alive59(host, port, timeout=0.0):
+        return object()
+
+    _cw59.mc_ping = _alive59
+    _w = _CW59()
+    _w.outage_started("s59", ("127.0.0.1", 25565))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    return _w.verdict("s59")
+
+
+_real59, _basis59, _ = asyncio.run(_probe_alive59())
+assert _real59 is False and _basis59 == _VA59, "服务器仍在响应时应判为抖动，不发通知"
+
+
+async def _probe_down59():
+    async def _dead59(host, port, timeout=0.0):
+        return None
+
+    _cw59.mc_ping = _dead59
+    _w = _CW59()
+    _w.outage_started("s59", ("127.0.0.1", 25565))
+    for _ in range(10):
+        await asyncio.sleep(0)
+    return _w.verdict("s59")
+
+
+_real59, _basis59, _ = asyncio.run(_probe_down59())
+assert _real59 is True and _basis59 == _VDN59, "探到服务器失联说明确实重启过"
+_cw59.mc_ping = _orig_mcping59
+_cw59.CONNECT_NOTIFY_PROBE_INTERVAL = _orig_interval59
+# close() 取消未完成的探测任务，不留僵尸
+async def _close59():
+    async def _hang59(host, port, timeout=0.0):
+        await asyncio.sleep(3600)
+        return object()
+
+    _cw59.mc_ping = _hang59
+    _w = _CW59()
+    _w.outage_started("s59", ("127.0.0.1", 25565))
+    assert "s59" in _w._tasks, "有探测地址时应启动探测任务"
+    _w.close()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    return _w
+
+
+assert not asyncio.run(_close59())._tasks, "close() 应清空探测任务"
+_cw59.mc_ping = _orig_mcping59
+
+# (d) main 侧接线：断线登记断线时刻，连通时按判定结果决定是否发通知
+from astrbot_plugin_minecraft_queqiao.main import (
+    MinecraftQueQiaoPlugin as _P59,
+)
+
+
+class _M59:
+    def record_event(self, *args, **kwargs):
+        pass
+
+
+class _T59:
+    def append(self, *args, **kwargs):
+        pass
+
+
+_dum59 = _P59.__new__(_P59)
+_sent59 = []
+
+
+async def _fake_send59(config, text):
+    _sent59.append(text)
+    return 1
+
+
+_dum59.metrics = _M59()
+_dum59.terminal_logs = _T59()
+_dum59._send_text_to_sessions = _fake_send59
+_cfg59 = ServerConfig.from_dict({
+    "server": {"server_name": "S59n"},
+    "notify_on_connect": True,
+    "message": {"target_sessions": ["umo:GroupMessage:59"]},
+})
+_dum59._configs = {"S59n": _cfg59}
+_dum59.connect_watch = _CW59()
+assert "slp_address" in _P59.SOFT_CONFIG_KEYS, "面板需能热更新探测地址"
+
+asyncio.run(_P59._make_disconnect_handler(_dum59, "S59n")("测试断开"))
+assert "S59n" in _dum59.connect_watch._lost_at, "断线回调必须登记断线时刻"
+assert not _dum59.connect_watch._tasks, "未配置探测地址时不得起探测任务"
+# 抖动重连（5 秒）→ 不发通知
+asyncio.run(_P59._notify_server_online(_dum59, "S59n"))
+assert _sent59 == [], "断线 5 秒的重连不得发「服务器已启动」"
+# 真重启（断线 140 秒）→ 发通知
+_dum59.connect_watch.outage_started("S59n", None)
+_dum59.connect_watch._lost_at["S59n"] = _cw59.time.monotonic() - 140
+asyncio.run(_P59._notify_server_online(_dum59, "S59n"))
+assert len(_sent59) == 1 and "🟢" in _sent59[0], _sent59
+# 首次连接（无断线记录）→ 仍发通知，保持升级前行为
+asyncio.run(_P59._notify_server_online(_dum59, "S59n"))
+assert len(_sent59) == 2, "首次连接应发通知"
+# 未配置探测地址（空串）也不该崩：slp_target 返回 None
+assert _P59._slp_target(_dum59, "S59n") is None
+_cfg59.slp_address = " 127.0.0.1:25599 "
+assert _P59._slp_target(_dum59, "S59n") == ("127.0.0.1", 25599)
+
+# (e) schema：slp_address 为条目顶层字符串，默认值与代码一致
+_schema59 = json.loads(
+    pathlib.Path(__file__).with_name("_conf_schema.json").read_text(encoding="utf-8")
+)
+_items59 = _schema59["mc_servers"]["templates"]["server"]["items"]
+assert "slp_address" in _items59, "schema 缺少 slp_address"
+assert _items59["slp_address"]["type"] == "string"
+assert _items59["slp_address"]["default"] == ServerConfig.from_dict({}).slp_address == ""
+assert "25565" in _items59["slp_address"]["hint"]
+assert "slp_address" not in _items59["message"]["items"], "应属条目顶层"
+assert ServerConfig.from_dict({"slp_address": " 1.2.3.4:25566 "}).slp_address == (
+    "1.2.3.4:25566"
+)
+
+print("OK  探测地址解析/抖动静默/真启动通知/schema 全部通过")
+

@@ -36,6 +36,7 @@ from .core.queqiao_client import QueQiaoTimeout
 from .core.server_manager import ServerManager
 from .handlers.commands import CommandHandler, parse_direct_address
 from .services.binding import BindingService
+from .services.connect_watch import ConnectWatch
 from .services.image_bed import (
     BuiltinHttpUploader,
     ImageBedUploader,
@@ -50,6 +51,7 @@ from .services.metrics import MetricsCollector
 from .services.monitor import MonitorCollector
 from .services.panel_prefs import PanelPrefsStore
 from .services.renderer import InfoRenderer
+from .services.slp_ping import parse_host_port
 from .services.terminal_log import TerminalLogStore
 from .services.translator import Translator
 from .services.web_api import WebApiController
@@ -95,6 +97,8 @@ class MinecraftQueQiaoPlugin(Star):
         self.command_handler.attach_monitor(self.monitor)
 
         self._configs: dict[str, ServerConfig] = {}
+        # 连通通知的「真启动」判定：断线期间探测服务端端口，区分重启与抖动
+        self.connect_watch = ConnectWatch()
         self.web_api = WebApiController(
             context,
             self.server_manager,
@@ -196,6 +200,7 @@ class MinecraftQueQiaoPlugin(Star):
 
     async def _stop_runtime(self) -> None:
         """停止所有运行时连接与监听（不触碰 self.config）。"""
+        self.connect_watch.close()
         await self.image_bed.stop_builtin()
         await self.server_manager.stop_all()
         await self.monitor.stop()
@@ -223,6 +228,7 @@ class MinecraftQueQiaoPlugin(Star):
         "notify_on_connect_fail",
         "notify_on_connect_fail_format",
         "connect_fail_notify_delay",
+        "slp_address",
         "quiet_hours_enabled",
         "quiet_hours_start",
         "quiet_hours_end",
@@ -474,12 +480,23 @@ class MinecraftQueQiaoPlugin(Star):
     async def _notify_server_online(self, server_name: str) -> None:
         """服务器连通后按配置向目标会话发送「服务器已启动」通知。
 
-        每次连接建立都会触发（含断线重连、插件热重载后重新连上）；
-        开关关闭或未配置目标会话时静默跳过。发送失败只告警，
-        不影响连接本身（连接回调由 QueQiaoClient 统一兜底）。
+        每次连接建立都会触发（含断线重连、插件热重载后重新连上），因此发送前
+        先用 connect_watch 判定这次重连背后服务器是否真的启动过：短时断连
+        （隧道抖动、服务端卡顿、热重载）不发通知，避免「服务器已启动」误报。
+        开关关闭或未配置目标会话时静默跳过。发送失败只告警，不影响连接本身。
         """
+        watch = getattr(self, "connect_watch", None)
+        real_start, basis, downtime = (
+            watch.verdict(server_name) if watch is not None else (True, "", 0.0)
+        )
         config = self._configs.get(server_name)
         if config is None or not config.notify_on_connect:
+            return
+        if not real_start:
+            logger.info(
+                f"[{PLUGIN_NAME}][{server_name}] 断线 {downtime:.0f} 秒后重连，"
+                f"判定为连接抖动（依据 {basis}），跳过启动通知"
+            )
             return
         # 免打扰时段：连通通知可单独静音（夜里重连不打扰）
         if config.quiet_suppresses(QUIET_ITEM_CONNECT):
@@ -491,6 +508,7 @@ class MinecraftQueQiaoPlugin(Star):
             logger.info(
                 f"[{PLUGIN_NAME}][{server_name}] 已向 {sent}/"
                 f"{len(config.target_sessions)} 个会话发送服务器启动通知"
+                f"（依据 {basis or 'unknown'}，断线 {downtime:.0f} 秒）"
             )
 
     async def _notify_server_fail(self, server_name: str) -> None:
@@ -572,8 +590,19 @@ class MinecraftQueQiaoPlugin(Star):
                 "conn", server_name, f"连接断开: {reason}", {"reason": reason}
             )
             self.terminal_logs.append(server_name, "conn", f"🔴 连接断开: {reason}")
+            # 断线即开始探测服务端是否还在响应，供下次连上时判定真启动/抖动
+            watch = getattr(self, "connect_watch", None)
+            if watch is not None:
+                watch.outage_started(server_name, self._slp_target(server_name))
 
         return _handler
+
+    def _slp_target(self, server_name: str) -> tuple[str, int] | None:
+        """取该服务器配置的状态探测地址，未配置或非法时返回 None。"""
+        config = self._configs.get(server_name)
+        if config is None:
+            return None
+        return parse_host_port(config.slp_address)
 
     def _make_connect_fail_handler(self, server_name: str):
         async def _handler(reason: str) -> None:
