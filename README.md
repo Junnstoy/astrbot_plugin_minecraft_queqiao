@@ -10,8 +10,8 @@
 
 通过 [鹊桥（QueQiao）](https://github.com/17TheWord/QueQiao) 模组连接 Minecraft 服务器与 AstrBot，实现群服消息互通与服务器管理。
 
-- **群服互通**：游戏内聊天与群消息双向转发；回复 Bot 转发的游戏消息时，转发进游戏的内容自动附 `@原玩家名`，游戏内一目了然是谁在群里回复
-- **图片互通**：群消息图片转发进游戏（需玩家安装 [ChatImage](https://github.com/kitUIN/ChatImage) 模组渲染）；游戏内图片 / 链接自动下载后发回群
+- **群服互通**：游戏内聊天与群消息双向转发；引用回复显示目标玩家，悬停查看引用正文；网页链接显示为可点击的 `[链接]`，回传群聊时还原网址
+- **图片互通**：群消息图片可转为原版客户端可点击链接，或由 [ChatImage](https://github.com/kitUIN/ChatImage) 模组渲染；游戏内图片 / 链接自动下载后发回群
 - **事件播报**：玩家进出 / 死亡 / 成就事件转发到指定会话（死亡与成就原版端与 Velocity 不支持）
 - **连通通知**：服务器连通 / 连接失败后向目标会话发送提示，文案可自定义
 - **免打扰时段**：按服务器设置安静时段（如 `23:00` 至 `08:00`），时段内按类型静音游戏消息与连通通知，夜里不刷群
@@ -35,6 +35,7 @@
 | `/mc say [编号] <内容>` | 管理员 | 向游戏内广播消息 |
 | `/mc bind <游戏ID>` | 全部 | 绑定你的游戏ID |
 | `/mc unbind` | 全部 | 解除绑定 |
+| `/mc 修改 @玩家 新游戏ID` | 管理员 | 修改目标用户已有的绑定 |
 | `/mc servers` | 全部 | 查看已配置服务器与连接状态 |
 
 多台服务器时在指令前加数字编号选择目标（如 `mc cmd 1 time set day` 定向第 1 台），仅一台服务器时可省略；`mc servers` 可查看各服务器编号。
@@ -42,6 +43,47 @@
 `mc status` / `mc list` 支持**地址直连**：把参数换成 `host:port`（如 `mc status 127.0.0.1:25565`），插件直接以 Minecraft SLP 协议查询**任意**服务器（版本、在线人数、延迟、MOTD、玩家名），无需配置鹊桥；省略端口默认 `25565`。
 
 ### 自定义指令
+
+**回复模板与 Python 函数**：在 AstrBot 插件配置的「回复模板」中设置文案，或从鹊桥仪表盘「配置管理」进入（服务器视图也显示全局回复设置）。`reply_templates` 为所有服务器共用的对象，`reply_hook_enabled` 默认开启。覆盖绑定缺参/格式错误/成功/重复绑定、管理员修改绑定缺参/未绑定/成功、解绑成功/未绑定、快捷指令要求绑定、指令成功/关闭/名单拒绝/失败/服务器不存在共 15 类。普通聊天、`mc list/status` 等查询输出不走此入口。
+
+**指令前缀**：插件级 `mc_command_prefix_enabled` 默认 `true`。关闭后，`mc bind` 变为 `bind` 等独立指令，可在 AstrBot「管理行为」中将 `bind` 改为 `绑定`；原有全局唤醒头仍生效，例如 `#绑定 Steve`。切换保留指令重命名与管理员权限。已绑定用户必须先解绑才能重新绑定；管理员可用 `#修改 @玩家 新游戏ID` 修改已有绑定（开启 mc 前缀时用 `#mc 修改 @玩家 新游戏ID`）。
+
+**与 AI / RSSHub 共存**：群消息监听以低优先级处理，已匹配的插件指令交给对应插件。满足宿主唤醒规则及当前会话 AI 前缀的消息直接进入 AstrBot 原有 AI 流程；例如全局唤醒头 `#`、AI 前缀 `chat` 时发送 `#chat 问题` 或 `@机器人 chat 问题`。本插件不新增 QQ AI 前缀。普通群聊与引用游戏消息继续互通；游戏内 AI 仍由 `ai_chat_prefix` 控制。
+
+模板支持 `{sender_name}`、`{sender_id}`、`{player}`；指令回复另有 `{command}`、`{output}`、`{server_name}`。`bind_usage` 对应空参数 `mc bind`，`command_success` 对应 `mc cmd` 及自定义映射执行后的回复；只想显示服务器结果时将后者填为 `{output}`。留空恢复默认，未知占位符原样保留。无游戏名时不再由宿主抛“必要参数缺失”。
+
+本地脚本位于 `data/plugin_data/astrbot_plugin_minecraft_queqiao/reply_hook.py`，首次运行自动生成，已有文件不会被覆盖。同步函数 `customize_reply(key, data, text)` 接收回复类型、占位符数据和已渲染模板；返回非空字符串覆盖回复，返回 `None` 保留模板。脚本保存后下一次回复自动加载；语法错误、异常或错误返回类型会记录日志并回退模板。函数只修改显示文本，不会改变绑定/指令执行权限；它是本机管理员维护的普通 Python 文件，不接收群聊代码。
+
+```python
+def customize_reply(key, data, text):
+    if key == "bind_usage":
+        return f"{data['sender_name']}，请填写游戏名，例如：#mc bind Steve"
+    if key == "command_success":
+        return data.get("output") or "执行完成"
+    return None
+```
+
+账号绑定按「机器人实例 + 发送者」保存，同群用户不会覆盖彼此。Java 游戏 ID 限 1–16 位英文字母、数字或下划线。面板使用 `bot-one:User:QQ号` 管理 NapCat 用户绑定，官方 QQ 机器人使用不同的用户标识，不能直接套用数字 QQ 号。
+
+快捷指令中的 `{sender}` 使用当前发送者的绑定；未绑定会提示绑定。快捷指令也受远程指令开关和黑白名单限制。它用于映射已有的服务端命令，不能单独实现数据库签到、积分结算或排行榜。
+
+### QQ 图片、链接与引用回复
+
+开启「转发图片到游戏内」后，可用「图片转发形式」（`message.image_forward_mode`）选择 `link`（可点击图片链接，原版客户端即可使用）或 `chatimage`（默认，需 ChatImage 模组显示图片）。普通网页链接及 QQ 分享卡片中的网页链接也会转换为可点击组件。QQ 图片地址可能过期，过期后需要重新发送图片。
+
+引用回复显示为 `发送者(回复 @被回复者)：正文`，默认回复标记及悬停标题“回复内容：”为灰色；显式 `{reply}` 的颜色和字体由模板控制，引用正文为白色。悬停显示引用内容，不另起一行、不点击填入聊天框。引用中的图片用 `[图片]` 标记，避免长图片地址撑满悬停框。若 NapCat 未能取得原消息，会在悬停中显示消息编号。普通图片发送仍保留可点击原图链接，兼容 AstrBot 图片本地化处理。无需修改服务端鹊桥。
+
+QQ 网页链接和分享卡片在 MC 中显示为 `[链接]`，悬停显示实际网址，点击打开。MC→QQ 遇到 `[链接]` 时，从文本组件的网页点击事件或悬停文本还原实际网址；兼容新旧事件字段及父组件继承。如果鹊桥仅发送纯文本而没有网址信息，则保留 `[链接]`。
+
+转发到 MC 的 `{sender}` 优先使用该 QQ 用户绑定的游戏名，未绑定时使用 QQ 名称；`{player}` 是相同显示值的别名。回复目标也优先使用解析出的游戏玩家名或该 QQ 用户的绑定。
+
+模板可以单独放置 `{reply}`（回复标记，颜色和字体跟随模板，无回复时为空）。写了 `{reply}` 后 `{sender}` / `{player}` 只显示名称；旧模板不写 `{reply}` 时仍自动附加标记。`{sender_name}` 始终只显示名称，`{reply_player}` 仅显示回复目标。鹊桥「配置管理」中的格式输入框提供占位符和样式插入菜单，AstrBot 原生配置表单的提示也列出了语法。
+
+模板颜色支持 `&0`～`&f` / `§0`～`§f` 及 `&#RRGGBB`；字体支持 `&l` 粗体、`&o` 斜体、`&n` 下划线、`&m` 删除线、`&k` 随机字符、`&r` 恢复默认颜色和字体。也支持 MC 英文颜色名占位符（如 `{gray}`、`{gold}`、`{white}`）及 `{bold}`、`{italic}`、`{underlined}`、`{strikethrough}`、`{obfuscated}`、`{reset}`。颜色码会清除此前字体样式。只解析模板中的样式，QQ 名称、正文与网址保持原文。显式 `{reply}` 跟随模板当前颜色和字体；旧模板自动追加的标记仍默认灰色。
+
+示例：`&7[{platform}] &e{player}&7{reply}&f：{message}`（平台灰色、发送者黄色、回复灰色、正文白色）。
+
+面板修改转发格式后点击保存即可生效。日志加载天数与断连静默期使用 AstrBot 的 `int` 类型，修复了该字段为空时导致整份配置无法保存的问题；升级后若页面仍显示旧表单，请刷新页面。
 
 `cmd.custom_cmd_list` 支持自定义快捷指令，格式：
 
@@ -131,7 +173,7 @@
 | `forward_death_to_astrbot` | bool | `false` | 转发玩家死亡消息（原版/Velocity 不支持） |
 | `forward_achievement_to_astrbot` | bool | `false` | 转发玩家成就消息（原版/Velocity 不支持） |
 | `auto_forward_prefix` | string | 空 | 群消息以此开头才转发到游戏；留空 = 全部转发 |
-| `broadcast_format` | string | `[{platform}]{sender}: {message}` | 转发到游戏内的格式，支持 `{platform}` `{sender}` `{message}` `{display_name}` `{server_name}` |
+| `broadcast_format` | string | `[{platform}]{sender}: {message}` | 转发到游戏内的格式，支持 `{platform}` `{sender}` `{player}` `{message}` `{display_name}` `{server_name}` |
 | `platform_names` | list | `["aiocqhttp=QQ"]` | 平台名称映射：`原始平台名=显示名`，如 `aiocqhttp=QQ` |
 | `broadcast_color` | string | `white` | 转发消息颜色，支持 MC 颜色名或 `#RRGGBB` |
 | `mark_option` | string | `emoji` | 转发成功提醒：`text` 回复 ✅ / `emoji` 贴表情 / `none` 不提醒 |
@@ -280,7 +322,10 @@
 | `{message}` | 两个格式串 | 消息内容 |
 | `{display_name}` | 两个格式串、`notify_on_connect_format`、`notify_on_connect_fail_format` | 服务器显示名称；留空时用 `display_name_default`（默认 `MC`），两者都留空才输出空串 |
 | `{platform}` | `broadcast_format` | 平台名（可经 `platform_names` 映射，如 `aiocqhttp` → `QQ`） |
-| `{sender}` | `broadcast_format` | 发送者名 |
+| `{sender}` / `{player}` | `broadcast_format` | 优先显示绑定游戏名，未绑定时显示 QQ 名称；模板未写 `{reply}` 时自动附加回复目标 |
+| `{sender_name}` | `broadcast_format` | 发送者名称，不自动附加回复目标 |
+| `{reply}` / `{reply_player}` | `broadcast_format` | 跟随模板样式的回复标记 / 回复目标名称；无回复时为空 |
+| `{gray}` / `{gold}` 等颜色名、`{bold}` / `{reset}` 等样式名 | `broadcast_format` | 切换 MC 颜色和字体样式，详见上方模板示例 |
 | `{server_name}` | `broadcast_format`、`notify_on_connect_format`、`notify_on_connect_fail_format` | 服务器名称（始终有值） |
 
 示例：`display_name` = `生存服`、格式 `[{display_name}] <{player}> {message}` → `[生存服] <Steve> 大家好`；什么都不填 → `[MC] <Steve> 大家好`。

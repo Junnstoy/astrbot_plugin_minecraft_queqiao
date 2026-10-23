@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .constants import (
+    DEFAULT_REPLY_TEMPLATES,
     DEFAULT_BROADCAST_FORMAT,
     DEFAULT_CHAT_FORMAT,
     DEFAULT_CHATIMAGE_NAME,
@@ -176,6 +177,26 @@ def _to_platform_map(value: object) -> dict[str, str]:
 
 
 @dataclass
+class ReplyConfig:
+    """插件级回复设置，独立于各服务器的执行权限。"""
+    mc_command_prefix_enabled: bool = True
+    reply_hook_enabled: bool = True
+    reply_templates: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_REPLY_TEMPLATES))
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ReplyConfig":
+        raw = data.get("reply_templates", {})
+        if not isinstance(raw, dict):
+            raw = {}
+        return cls(
+            mc_command_prefix_enabled=_to_bool(data.get("mc_command_prefix_enabled"), True),
+            reply_hook_enabled=_to_bool(data.get("reply_hook_enabled"), True),
+            reply_templates={key: raw[key] if isinstance(raw.get(key), str) and raw[key].strip() else default
+                             for key, default in DEFAULT_REPLY_TEMPLATES.items()},
+        )
+
+
+@dataclass
 class ServerConfig:
     """单台 MC 服务器的完整配置（对应 conf 中一个模板项）。"""
 
@@ -256,8 +277,9 @@ class ServerConfig:
     broadcast_color: str = "white"
     mark_option: str = "emoji"
     mark_emoji_id: int = EMOJI_OK_GESTURE
-    # 外部会话消息中的图片转发到游戏内（依赖游戏端 ChatImage 模组渲染）
+    # 图片可选择原版可点击链接，或由 ChatImage 模组渲染。
     forward_image_to_mc: bool = False
+    image_forward_mode: str = "chatimage"
     # ChatImage 代码中 name 参数的取值（图片在聊天栏的显示名）
     chatimage_name: str = DEFAULT_CHATIMAGE_NAME
     # 游戏内聊天消息中的图片（ChatImage CICode 代码 / 图片链接）下载后作为图片转发到外部
@@ -603,6 +625,7 @@ class ServerConfig:
             mark_option=mark_option,
             mark_emoji_id=mark_emoji_id,
             forward_image_to_mc=_to_bool(message.get("forward_image_to_mc"), False),
+            image_forward_mode=("link" if message.get("image_forward_mode") == "link" else "chatimage"),
             chatimage_name=_to_str(
                 message.get("chatimage_name"), DEFAULT_CHATIMAGE_NAME
             ).strip()

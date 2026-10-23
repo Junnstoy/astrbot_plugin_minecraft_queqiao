@@ -35,6 +35,7 @@ from ..core.constants import (
 )
 from ..core.models import QueQiaoEvent
 from ..core.models_config import ServerConfig
+from .rich_message import http_url, URL_PATTERN
 
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
@@ -66,19 +67,44 @@ def component_to_text(raw: str) -> str:
     except ValueError:
         return strip_formatting(stripped)
 
-    def _extract(node: object) -> str:
+    def _hover_text(node: object) -> str:
         if isinstance(node, str):
             return node
         if isinstance(node, list):
-            return "".join(_extract(item) for item in node)
+            return "".join(_hover_text(item) for item in node)
         if isinstance(node, dict):
+            return str(node.get("text", "")) + _hover_text(node.get("extra", []))
+        return ""
+
+    def _link_url(click: object, hover: object) -> str:
+        if isinstance(click, dict) and str(click.get("action", "")).lower() == "open_url":
+            url = http_url(click.get("url")) or http_url(click.get("value"))
+            if url:
+                return url
+        if isinstance(hover, dict) and str(hover.get("action", "")).lower() == "show_text":
+            text = _hover_text(hover.get("contents", hover.get("value", hover.get("text", ""))))
+            match = URL_PATTERN.search(text)
+            if match:
+                return http_url(match.group().rstrip(".,;!?，。；！？）)"))
+        return ""
+
+    def _extract(node: object, click: object = None, hover: object = None) -> str:
+        if isinstance(node, str):
+            return node
+        if isinstance(node, list):
+            return "".join(_extract(item, click, hover) for item in node)
+        if isinstance(node, dict):
+            click = node.get("click_event", node.get("clickEvent", click))
+            hover = node.get("hover_event", node.get("hoverEvent", hover))
             parts: list[str] = []
             if "text" in node:
-                parts.append(str(node["text"]))
+                text = str(node["text"])
+                url = _link_url(click, hover) if "[链接]" in text else ""
+                parts.append(text.replace("[链接]", url) if url else text)
             if "extra" in node:
-                parts.append(_extract(node["extra"]))
+                parts.append(_extract(node["extra"], click, hover))
             if "with" in node:
-                parts.append(_extract(node["with"]))
+                parts.append(_extract(node["with"], click, hover))
             return "".join(parts)
         return ""
 

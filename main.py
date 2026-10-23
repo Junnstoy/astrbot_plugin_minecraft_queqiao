@@ -52,6 +52,8 @@ from .services.monitor import MonitorCollector
 from .services.panel_prefs import PanelPrefsStore
 from .services.renderer import InfoRenderer
 from .services.slp_ping import parse_host_port
+from .services.reply_formatter import ReplyFormatter
+from .services.rich_message import card_links, component_kind, event_reply_context, format_broadcast, reply_author, rich_components, source_image_urls
 from .services.terminal_log import TerminalLogStore
 from .services.translator import Translator
 from .services.web_api import WebApiController
@@ -93,6 +95,10 @@ class MinecraftQueQiaoPlugin(Star):
         self.command_handler = CommandHandler(
             self.server_manager, self.binding_service, self.renderer
         )
+        self.command_handler.reply_formatter = ReplyFormatter(
+            lambda: self.config, data_dir / "reply_hook.py"
+        )
+        self.command_handler.reply_formatter.ensure_hook_file()
         self.command_handler.attach_bridge(self.message_bridge)
         self.command_handler.attach_monitor(self.monitor)
 
@@ -118,6 +124,7 @@ class MinecraftQueQiaoPlugin(Star):
 
     async def initialize(self) -> None:
         """加载配置并启动所有服务器连接（由 AstrBot 在加载插件后调用）。"""
+        self._configure_command_prefix()
         if not self.config.get("enabled", True):
             logger.info(f"[{PLUGIN_NAME}] 插件已禁用")
             return
@@ -327,6 +334,7 @@ class MinecraftQueQiaoPlugin(Star):
         清空索引后重新应用，使服务器列表/条目/开关的改动全部生效。
         """
         logger.info(f"[{PLUGIN_NAME}] 配置已更新，正在热重载...")
+        self._configure_command_prefix()
         await self._stop_runtime()
         self._configs.clear()
         self.message_bridge.clear()
@@ -860,6 +868,14 @@ class MinecraftQueQiaoPlugin(Star):
             logger.error(f"[{PLUGIN_NAME}] LLM 调用失败: {exc}")
             return ""
 
+    def _configure_command_prefix(self) -> None:
+        from .services.command_prefix import configure_command_prefix
+        from .core.models_config import ReplyConfig
+
+        enabled = ReplyConfig.from_dict(self.config).mc_command_prefix_enabled
+        configure_command_prefix(self.__class__.__module__, enabled)
+        logger.info(f"[{PLUGIN_NAME}] mc 指令前缀: {'开启' if enabled else '关闭（可在管理行为中重命名独立指令）'}")
+
     # ---- 命令组 ----
 
     @filter.command_group("mc")
@@ -867,12 +883,12 @@ class MinecraftQueQiaoPlugin(Star):
         """Minecraft 服务器管理命令"""
         pass
 
-    @mc_group.command("help")
+    @filter.command("help")
     async def cmd_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
         yield event.plain_result(self.command_handler.help_text())
 
-    @mc_group.command("status")
+    @filter.command("status")
     async def cmd_status(self, event: AstrMessageEvent, target: str = ""):
         """查看服务器状态（可指定数字编号或 host:port 地址直连查询）"""
         if target and not target.isdigit():
@@ -893,7 +909,7 @@ class MinecraftQueQiaoPlugin(Star):
             return
         yield event.plain_result(await self.command_handler.handle_status(event, server.server_name))
 
-    @mc_group.command("list")
+    @filter.command("list")
     async def cmd_list(self, event: AstrMessageEvent, target: str = ""):
         """查看在线玩家列表（可指定数字编号或 host:port 地址直连查询）"""
         if target and not target.isdigit():
@@ -914,7 +930,7 @@ class MinecraftQueQiaoPlugin(Star):
             return
         yield event.plain_result(await self.command_handler.handle_list(event, server.server_name))
 
-    @mc_group.command("player")
+    @filter.command("player")
     async def cmd_player(self, event: AstrMessageEvent, player_id=GreedyStr):
         """查看玩家信息
 
@@ -935,7 +951,7 @@ class MinecraftQueQiaoPlugin(Star):
             await self.command_handler.handle_player(event, server.server_name, rest)
         )
 
-    @mc_group.command("cmd")
+    @filter.command("cmd")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def cmd_execute(self, event: AstrMessageEvent, command=GreedyStr):
         """远程执行服务器指令
@@ -957,7 +973,7 @@ class MinecraftQueQiaoPlugin(Star):
             await self.command_handler.handle_cmd(event, server.server_name, rest)
         )
 
-    @mc_group.command("say")
+    @filter.command("say")
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def cmd_say(self, event: AstrMessageEvent, content=GreedyStr):
         """向游戏内广播消息
@@ -979,53 +995,92 @@ class MinecraftQueQiaoPlugin(Star):
             await self.command_handler.handle_say(event, server.server_name, rest)
         )
 
-    @mc_group.command("bind")
-    async def cmd_bind(self, event: AstrMessageEvent, game_id: str):
+    @filter.command("bind")
+    async def cmd_bind(self, event: AstrMessageEvent, game_id: str = ""):
         """绑定游戏ID"""
         yield event.plain_result(await self.command_handler.handle_bind(event, game_id))
 
-    @mc_group.command("unbind")
+    @filter.command("unbind")
     async def cmd_unbind(self, event: AstrMessageEvent):
         """解除绑定"""
         yield event.plain_result(await self.command_handler.handle_unbind(event))
 
-    @mc_group.command("servers")
+    @filter.command("修改")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def cmd_rebind(self, event: AstrMessageEvent, content=GreedyStr):
+        """管理员修改绑定：修改 @玩家 新游戏ID"""
+        self_id = str(event.get_self_id())
+        targets = {str(part.qq) for part in event.get_messages()
+                   if component_kind(part) == "At" and str(part.qq) not in {self_id, "all"}}
+        words = str(content).split()
+        if len(targets) != 1 or not words or words[-1].startswith("@") or words[-1] in targets:
+            yield event.plain_result(self.command_handler.reply("rebind_usage", event))
+            return
+        yield event.plain_result(await self.command_handler.handle_rebind(event, targets.pop(), words[-1]))
+
+    @filter.command("servers")
     async def cmd_servers(self, event: AstrMessageEvent):
         """查看服务器列表与连接状态"""
         yield event.plain_result(await self.command_handler.handle_servers(event))
 
     # ---- 消息监听：外部 → MC 转发与自定义指令 ----
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=-100)
     async def on_message(self, event: AstrMessageEvent):
         """处理外部消息：自定义指令匹配与转发到 MC（含图片）。
 
-        不要用 `is_at_or_wake_command` 短路：QQ 回复/转发 Bot 消息时客户端
-        会自动附带 @Bot（AstrBot 唤醒判定会因此标记唤醒命令），若在此 return，
-        这类回复内容将永远无法转发到游戏。空消息（无文本无图片）由下方统一过滤。
+        作为低优先级兜底，先让出已匹配的指令和宿主 AI 消息。
+        QQ 引用自动 @Bot 不应单凭唤醒标记被丢弃，仍需检查 AI 前缀。
         """
+        # 已经匹配到内置/RSSHub 等注册指令时，让其处理，不作为 MC 聊天吞掉。
+        extra = getattr(event, "get_extra", None)
+        activated = extra("activated_handlers") if callable(extra) else []
+        if any(type(item).__name__ in {"CommandFilter", "CommandGroupFilter"}
+               for handler in (activated or []) for item in handler.event_filters):
+            return
         umo = event.unified_msg_origin
         text = event.get_message_str().strip()
+        # 使用当前会话的宿主配置；不在 MC 插件中另建 QQ AI 入口。
+        # 已显式匹配 AI 前缀的引用也必须放行，保留宿主的上下文处理。
+        if getattr(event, "is_at_or_wake_command", False):
+            get_config = getattr(getattr(self, "context", None), "get_config", None)
+            host_config = get_config(umo=umo) if callable(get_config) else {}
+            provider_prefix = host_config.get("provider_settings", {}).get("wake_prefix", "chat")
+            for wake_prefix in host_config.get("wake_prefix", []):
+                if wake_prefix and provider_prefix.startswith(wake_prefix):
+                    provider_prefix = provider_prefix[len(wake_prefix):]
+            if provider_prefix:
+                # 与宿主的匹配方式一致（不是游戏内 ai_chat_prefix 的边界规则）。
+                if event.get_message_str().startswith(provider_prefix):
+                    return
+            elif not any(component_kind(part) == "Reply" for part in event.get_messages()):
+                return
+        for link in card_links(event.get_messages() or []):
+            if link not in text:
+                text = (text + " " + link).strip()
 
         # 图片不参与文本匹配，但可随消息一起转发到 MC
         images = self._extract_images(event)
         if not text and not images:
             return
 
+        bound_servers = self.message_bridge.servers_for_session(umo)
         # 自定义指令：仅在会话绑定的服务器上匹配（按文本匹配，图片不参与）
         if text:
-            for server_name, config in self.message_bridge.servers_for_session(umo):
+            for server_name, config in bound_servers:
                 actual = self.command_handler.match_custom_command(server_name, text)
                 if actual:
+                    if "{sender}" in actual:
+                        game_id = self.binding_service.get(self.binding_service.account_key(event))
+                        if not self.binding_service.valid_game_id(game_id):
+                            yield event.plain_result(self.command_handler.reply("binding_required", event))
+                            event.stop_event()
+                            return
+                        actual = actual.replace("{sender}", game_id)
                     instance = self.server_manager.get(server_name)
                     if instance is None:
                         continue
-                    output = await instance.execute_command(actual)
-                    reply = (
-                        f"✅ 已执行：{actual}\n{output}".rstrip()
-                        if output is not None
-                        else f"❌ 执行失败：{actual}"
-                    )
+                    reply = await self.command_handler.handle_cmd(event, server_name, actual)
                     yield event.plain_result(reply)
                     event.stop_event()
                     return
@@ -1045,7 +1100,14 @@ class MinecraftQueQiaoPlugin(Star):
         except Exception:
             return []
         components = event.get_messages() or []
-        return [comp for comp in components if isinstance(comp, Image)]
+        images = [comp for comp in components if isinstance(comp, Image)]
+        raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
+        urls = source_image_urls(raw)
+        if len(urls) == len(images):
+            # 宿主预处理会把 url/file 改为本地路径；用独立组件恢复 CDN 地址，
+            # 不修改宿主拥有的媒体文件及其清理生命周期。
+            images = [Image(file=url, url=url) if url else comp for comp, url in zip(images, urls)]
+        return images
 
     @staticmethod
     def _extract_reply_mention(
@@ -1114,7 +1176,7 @@ class MinecraftQueQiaoPlugin(Star):
 
         `images` 为消息链中的图片组件列表；仅当服务器开启了
         `forward_image_to_mc` 且能解析出玩家客户端可访问的 URL 时，
-        才以 ChatImage 代码形式追加到广播内容。
+        才按配置以可点击链接或 ChatImage 代码追加到广播内容。
         """
         targets = self.message_bridge.servers_for_session(umo)
         if not targets:
@@ -1123,7 +1185,10 @@ class MinecraftQueQiaoPlugin(Star):
 
         relayed = False
         sender = event.get_sender_name() or event.get_sender_id()
+        bound_player = self.binding_service.get(self.binding_service.account_key(event))
+        sender = bound_player or sender
         platform = event.get_platform_name() or "未知"
+        reference = await event_reply_context(event)
 
         for server_name, config in targets:
             if not self.message_bridge.should_relay(config, text):
@@ -1142,6 +1207,7 @@ class MinecraftQueQiaoPlugin(Star):
 
             # 图片 → ChatImage 代码（[[CICode,url=...,name=...]]）
             image_codes = []
+            image_links = []
             skipped_images = 0
             skipped_sample: object | None = None
             skip_reason: str | None = None
@@ -1151,9 +1217,10 @@ class MinecraftQueQiaoPlugin(Star):
                         comp, self.image_bed
                     )
                     if url:
-                        image_codes.append(
-                            build_chatimage_code(url, config.chatimage_name)
-                        )
+                        if config.image_forward_mode == "link":
+                            image_links.append(url)
+                        else:
+                            image_codes.append(build_chatimage_code(url, config.chatimage_name))
                     else:
                         skipped_images += 1
                         if skipped_sample is None:
@@ -1167,7 +1234,7 @@ class MinecraftQueQiaoPlugin(Star):
                     "但未开启 forward_image_to_mc，图片未转发"
                 )
 
-            if not content and not image_codes:
+            if not content and not image_codes and not image_links:
                 if skipped_images:
                     logger.warning(
                         f"[{PLUGIN_NAME}][{server_name}] 消息中的图片均无可访问"
@@ -1179,25 +1246,37 @@ class MinecraftQueQiaoPlugin(Star):
                 continue
 
             message = content
-            # 回复 Bot 转发的游戏消息时，被引用文本可反解出游戏玩家名，
-            # 在游戏内显示 `@玩家名`（回声抑制仍以 content 为准，不含 @）
-            mention = self._extract_reply_mention(event, config)
-            if mention:
-                message = f"@{mention}" + (f" {message}" if message else "")
+            target = ""
+            if reference:
+                chain = event.get_messages() or []
+                reply_id = next((str(getattr(comp, "sender_id", "") or "") for comp in chain
+                                 if component_kind(comp) == "Reply"), "")
+                bound_target = self.binding_service.get(f"{event.get_platform_id()}:User:{reply_id}") if reply_id else ""
+                target = self._extract_reply_mention(event, config) or bound_target or reply_author(chain)
             if image_codes:
                 message = (message + " " if message else "") + " ".join(image_codes)
 
-            formatted = config.broadcast_format.format(
+            template = config.broadcast_format
+            if reference:
+                template = template.replace("{sender}:", "{sender}：").replace("{player}:", "{player}：")
+            formatted = format_broadcast(template, dict(
                 # {platform} 先经平台名称映射（platform_names，如 aiocqhttp→QQ）；
                 # 未配置或未命中时原样保留
                 platform=config.platform_display_name(platform),
                 sender=sender,
+                player=sender,
+                sender_name=sender,
                 message=message,
                 # {display_name} 取显示名称（留空用默认值，默认 MC）；{server_name} 始终为原始 ID
                 display_name=config.server_label,
                 server_name=server_name,
-            )
-            sent = await instance.client.broadcast(formatted, config.broadcast_color)
+            ), config.broadcast_color, target)
+            components = rich_components(formatted, config.broadcast_color, image_links,
+                                         reference)
+            if components:
+                sent = await instance.client.broadcast_components(components)
+            else:
+                sent = await instance.client.broadcast("".join(part["text"] for part in formatted), config.broadcast_color)
             if not sent:
                 logger.warning(
                     f"[{PLUGIN_NAME}][{server_name}] 群消息转发到游戏失败: "
@@ -1220,15 +1299,15 @@ class MinecraftQueQiaoPlugin(Star):
                 f"[{PLUGIN_NAME}][{server_name}] 群消息 → 游戏: "
                 f"[{config.platform_display_name(platform)}]{sender}: {message}"
             )
-            if image_codes:
-                self.metrics.record_image_relayed(len(image_codes))
+            if image_codes or image_links:
+                self.metrics.record_image_relayed(len(image_codes) + len(image_links))
                 extra = (
                     f"，另 {skipped_images} 张无公开 URL 已跳过"
                     if skipped_images
                     else ""
                 )
                 logger.info(
-                    f"[{PLUGIN_NAME}][{server_name}] 已转发 {len(image_codes)} "
+                    f"[{PLUGIN_NAME}][{server_name}] 已转发 {len(image_codes) + len(image_links)} "
                     f"张图片到游戏内{extra}"
                 )
             # 转发成功后给原消息回执（emoji 贴表情 / text 文本回复）

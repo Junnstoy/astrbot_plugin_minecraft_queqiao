@@ -16,6 +16,7 @@ from ..core.models_config import ServerConfig
 from ..core.server_manager import ServerInstance, ServerManager
 from ..services.binding import BindingService
 from ..services.renderer import InfoRenderer
+from ..services.reply_formatter import ReplyFormatter
 from ..services.slp_ping import mc_ping
 
 CUSTOM_CMD_SEPARATOR = "<<>>"
@@ -82,8 +83,18 @@ class CommandHandler:
         self.server_manager = server_manager
         self.binding = binding_service
         self.renderer = renderer
+        self.reply_formatter = ReplyFormatter(lambda: {})
         # server_name -> [(trigger_tokens, param_names, template)]
         self._custom: dict[str, list[tuple[list[str], list[str], str]]] = {}
+
+    def reply(self, key: str, event: AstrMessageEvent, **fields) -> str:
+        data = {
+            "sender_name": event.get_sender_name() or event.get_sender_id(),
+            "sender_id": event.get_sender_id(),
+            "player": self.binding.get(self.binding.account_key(event)) or "",
+        }
+        data.update(fields)
+        return self.reply_formatter.render(key, **data)
 
     # ---- 自定义指令注册与匹配 ----
 
@@ -393,20 +404,22 @@ class CommandHandler:
 
     async def handle_cmd(self, event: AstrMessageEvent, server_name: str, command: str) -> str:
         instance = self.server_manager.get(server_name)
+        fields = {"server_name": server_name, "command": command, "output": ""}
         if instance is None:
-            return f"❌ 未找到服务器 {server_name}"
+            return self.reply("server_missing", event, **fields)
 
         config = instance.config
         if not config.cmd_enabled:
-            return "❌ 该服务器的远程指令功能已关闭"
+            return self.reply("command_disabled", event, **fields)
 
         if not config.is_command_allowed(command):
-            return f"🚫 指令 `{command}` 不在允许名单内"
+            return self.reply("command_denied", event, **fields)
 
         output = await instance.execute_command(command)
         if output is None:
-            return f"❌ 指令执行失败：{command}\n请确认鹊桥已开启 RCON 或已配置直连 RCON"
-        return f"✅ 已执行：{command}\n{output}".rstrip()
+            return self.reply("command_failed", event, **fields)
+        fields["output"] = output
+        return self.reply("command_success", event, **fields)
 
     async def handle_say(self, event: AstrMessageEvent, server_name: str, content: str) -> str:
         instance = self.server_manager.get(server_name)
@@ -420,12 +433,26 @@ class CommandHandler:
         return "✅ 已广播到游戏内" if success else "❌ 广播失败"
 
     async def handle_bind(self, event: AstrMessageEvent, game_id: str) -> str:
-        await self.binding.bind(event.unified_msg_origin, game_id)
-        return f"✅ 已绑定游戏ID：{game_id}"
+        if not game_id.strip():
+            return self.reply("bind_usage", event)
+        if not self.binding.valid_game_id(game_id):
+            return self.reply("bind_invalid", event, player=game_id)
+        previous = await self.binding.bind_if_unbound(self.binding.account_key(event), game_id)
+        if previous:
+            return self.reply("bind_existing", event, player=previous, requested_player=game_id)
+        return self.reply("bind_success", event, player=game_id)
+
+    async def handle_rebind(self, event: AstrMessageEvent, target_id: str, game_id: str) -> str:
+        if not self.binding.valid_game_id(game_id):
+            return self.reply("bind_invalid", event, player=game_id)
+        previous = await self.binding.replace_existing(f"{event.get_platform_id()}:User:{target_id}", game_id)
+        if not previous:
+            return self.reply("rebind_missing", event, target_id=target_id, player=game_id)
+        return self.reply("rebind_success", event, target_id=target_id, player=game_id, old_player=previous)
 
     async def handle_unbind(self, event: AstrMessageEvent) -> str:
-        removed = await self.binding.unbind(event.unified_msg_origin)
-        return "✅ 已解除绑定" if removed else "ℹ️ 你尚未绑定游戏ID"
+        removed = await self.binding.unbind(self.binding.account_key(event))
+        return self.reply("unbind_success" if removed else "unbind_missing", event)
 
     async def handle_servers(self, event: AstrMessageEvent) -> str:
         servers = self.server_manager.all()
