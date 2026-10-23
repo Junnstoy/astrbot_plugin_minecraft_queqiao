@@ -10,8 +10,8 @@
 
 Connects Minecraft servers to AstrBot through the [QueQiao](https://github.com/17TheWord/QueQiao) mod, bridging group chat with in-game chat and providing server management.
 
-- **Chat bridge**: two-way forwarding between in-game chat and group messages; replying to a game message forwarded by the bot automatically prepends `@原玩家名` (the original player name) in-game, so everyone sees who replied
-- **Image forwarding**: group images relayed into the game (players need the [ChatImage](https://github.com/kitUIN/ChatImage) mod installed to render them); in-game images / links are downloaded and sent back to the group
+- **Chat bridge**: two-way forwarding between in-game chat and group messages; replies show their recipient and reveal the quoted message on hover. Web URLs become clickable `[链接]` labels and are restored when sent back to the group
+- **Image forwarding**: group images can be sent as clickable links for vanilla clients or rendered with [ChatImage](https://github.com/kitUIN/ChatImage); in-game images / links are downloaded and sent back to the group
 - **Event broadcast**: player join / quit / death / achievement events forwarded to sessions (death & achievements unsupported on Vanilla/Velocity)
 - **Quiet hours**: give each server a silent window (e.g. `23:00`–`08:00`) that mutes the game message types and connection notices you pick, so nothing pings the group overnight
 - **Server management**: status queries, online player list, remote command execution
@@ -34,6 +34,7 @@ Connects Minecraft servers to AstrBot through the [QueQiao](https://github.com/1
 | `/mc say [number] <text>` | Admin | Broadcast a message in-game |
 | `/mc bind <game_id>` | Everyone | Bind your game ID |
 | `/mc unbind` | Everyone | Remove the binding |
+| `/mc 修改 @user new_game_id` | Admin | Replace an existing account binding |
 | `/mc servers` | Everyone | List configured servers and connection state |
 
 When several servers are configured, prefix the command with a number to pick the target (e.g. `mc cmd 1 time set day` targets the first server); with one server it can be omitted. Run `mc servers` to see each server's number.
@@ -41,6 +42,47 @@ When several servers are configured, prefix the command with a number to pick th
 `mc status` / `mc list` also support **direct address query**: pass a `host:port` instead (e.g. `mc status 127.0.0.1:25565`) and the plugin queries **any** server directly over the Minecraft SLP protocol (version, online count, latency, MOTD, player names) with no QueQiao or config needed. When the port is omitted it defaults to `25565`.
 
 ### Custom commands
+
+**Reply templates and Python function**: Set wording under Reply templates in AstrBot's plugin configuration or QueQiao's configuration editor. Server views also expose these global settings. `reply_templates` applies to all servers, and `reply_hook_enabled` defaults to true. Fifteen reply types cover binding usage/invalid IDs/success/already-bound, administrative changes (usage/missing binding/success), unbinding success/missing binding, shortcuts requiring binding, and command success/disabled/denied/failure/missing server. Ordinary chat and queries such as `mc list/status` are outside this interface.
+
+**Command prefix**: Plugin-wide `mc_command_prefix_enabled` defaults to `true`. Disabling it exposes commands such as `bind` without `mc`. Rename them in AstrBot's command management; global wake prefixes still apply, e.g. `#绑定 Steve` after renaming `bind` to `绑定`. Toggling preserves command names and admin filters. Existing users must unbind before binding again. Administrators can update an existing binding using `#修改 @user NewGameID` (or `#mc 修改 @user NewGameID` with the mc prefix enabled).
+
+**AI / RSSHub coexistence**: The group relay runs at low priority and yields to matched plugin commands. Messages satisfying the host wake rules and current session's AI prefix enter AstrBot's existing AI pipeline. With global prefix `#` and AI prefix `chat`, use `#chat question` or `@bot chat question`. No additional QQ AI prefix is introduced. Ordinary chat and quoted game messages still relay; in-game AI remains controlled by `ai_chat_prefix`.
+
+Templates accept `{sender_name}`, `{sender_id}`, `{player}`; command replies also accept `{command}`, `{output}`, `{server_name}`. `bind_usage` handles `mc bind` with no argument; `command_success` formats `mc cmd` and custom mappings. Set it to `{output}` to show only the server result. Empty templates use defaults; unknown placeholders remain literal. Missing game IDs now reach the plugin instead of triggering the host's parameter error.
+
+The local script is `data/plugin_data/astrbot_plugin_minecraft_queqiao/reply_hook.py`. It is created on first startup without overwriting existing files. Define synchronous `customize_reply(key, data, text)` to receive the reply key, placeholder data and rendered template. Return a nonempty string to override, or `None` to keep the template. Edits reload on the next reply. Syntax/runtime/type errors are logged and fall back to the template. This changes display text only, retaining binding and command permissions. It is an administrator-maintained local Python file, never code supplied through chat.
+
+```python
+def customize_reply(key, data, text):
+    if key == "bind_usage":
+        return f"{data['sender_name']}, enter a game name: #mc bind Steve"
+    if key == "command_success":
+        return data.get("output") or "Done"
+    return None
+```
+
+Bindings are scoped to the bot instance and sender, so group members cannot overwrite each other's binding. Java player names must contain 1–16 letters, digits or underscores. Use `bot-one:User:QQ-number` to manage NapCat bindings in the dashboard. Official QQ bots use different user identifiers and cannot reuse numeric QQ IDs directly.
+
+The `{sender}` placeholder uses the current sender's binding and requests binding when absent. Shortcuts respect the remote-command switch and allow/deny list. They map existing server commands; database check-ins, point accounting and rankings require additional logic.
+
+### QQ images, links and quoted replies
+
+With image forwarding enabled, `message.image_forward_mode` selects `link` (clickable image links supported by vanilla clients) or `chatimage` (the default, rendered by the ChatImage mod). Web links and destination URLs from QQ share cards become clickable components as well. QQ image URLs may expire; resend the image when that happens.
+
+Quoted replies display `sender(回复 @recipient)：message`, with ASCII-parenthesized reply markers (gray by default, template-styled with explicit `{reply}`) and a gray tooltip heading, followed by white quoted text. The quoted content appears on hover only, without an extra line or click-to-insert action. Quoted images use `[图片]` instead of long CDN addresses; an unavailable original message is represented by its ID in the tooltip. Regular image messages retain clickable original URLs even after AstrBot localizes the image. No QueQiao server changes are needed.
+
+QQ web links and share cards display as `[链接]` in Minecraft, with the actual URL on hover and an open-link click action. In the reverse direction, `[链接]` is expanded using the component's open-URL click event or hover text, supporting both field formats and inherited parent events. If QueQiao supplies plain text without URL metadata, the original label is retained.
+
+The MC broadcast `{sender}` uses the QQ user's bound game name when available, otherwise their QQ name. `{player}` is an alias for the same display value. Reply recipients also prefer the parsed game player name or the referenced QQ user's binding.
+
+Place `{reply}` separately to position the reply marker with the current template color and decorations; it is empty for ordinary messages. With `{reply}` present, `{sender}` / `{player}` contain only the name; legacy templates still append the marker automatically. `{sender_name}` always contains only the name, and `{reply_player}` contains only the recipient. The QueQiao configuration editor has a placeholder/style insertion menu; the native AstrBot form also documents the syntax in its hint.
+
+Templates support `&0`–`&f` / `§0`–`§f`, hex `&#RRGGBB`, and `&l` bold, `&o` italic, `&n` underline, `&m` strikethrough, `&k` obfuscated, `&r` reset. Named Minecraft colors such as `{gray}`, `{gold}`, `{white}` and styles `{bold}`, `{italic}`, `{underlined}`, `{strikethrough}`, `{obfuscated}`, `{reset}` are also supported. Color codes clear previous decorations. Only template text is interpreted; QQ names, message bodies and URLs remain literal. Explicit `{reply}` inherits the current template color and decorations. Automatically appended legacy markers remain gray.
+
+Example: `&7[{platform}] &e{player}&7{reply}&f：{message}` (gray platform, yellow sender, gray reply and white body).
+
+Save the forwarding format in the dashboard to apply it. The log-day and disconnect-quiet-period settings use AstrBot's `int` type, fixing configuration saves when either field is empty. Refresh the page after upgrading if the old form remains visible.
 
 The `cmd.custom_cmd_list` option defines shortcuts using this syntax:
 
@@ -126,7 +168,7 @@ The “⚙ 设置” button at the top right (next to the auto-refresh toggle) o
 | `forward_death_to_astrbot` | bool | `false` | Forward death messages (unsupported on Vanilla/Velocity) |
 | `forward_achievement_to_astrbot` | bool | `false` | Forward achievement messages (unsupported on Vanilla/Velocity) |
 | `auto_forward_prefix` | string | empty | Group messages starting with it are relayed into the game; empty relays all |
-| `broadcast_format` | string | `[{platform}]{sender}: {message}` | Format used when relaying into the game; supports `{platform}` `{sender}` `{message}` `{display_name}` `{server_name}` |
+| `broadcast_format` | string | `[{platform}]{sender}: {message}` | Format used when relaying into the game; supports `{platform}` `{sender}` `{player}` `{message}` `{display_name}` `{server_name}` |
 | `platform_names` | list | `["aiocqhttp=QQ"]` | Platform name mapping: `raw=display`, e.g. `aiocqhttp=QQ` |
 | `broadcast_color` | string | `white` | Message color; MC color name or `#RRGGBB` |
 | `mark_option` | string | `emoji` | Acknowledgement after a successful relay: `text` replies ✅ / `emoji` reacts to the original message / `none` silent |
@@ -277,7 +319,10 @@ Format placeholders:
 | `{message}` | both formats | Message content |
 | `{display_name}` | both formats, `notify_on_connect_format`, `notify_on_connect_fail_format` | Server display name; falls back to `display_name_default` (`MC`) when blank, renders empty only when both are cleared |
 | `{platform}` | `broadcast_format` | Platform name (may be rewritten via `platform_names`, e.g. `aiocqhttp` → `QQ`) |
-| `{sender}` | `broadcast_format` | Sender name |
+| `{sender}` / `{player}` | `broadcast_format` | Bound game name, falling back to the QQ name; appends the reply marker when the template omits `{reply}` |
+| `{sender_name}` | `broadcast_format` | Sender name without an automatic reply marker |
+| `{reply}` / `{reply_player}` | `broadcast_format` | Template-styled reply marker / recipient name; empty when there is no reply |
+| `{gray}` / `{gold}` and other colors, `{bold}` / `{reset}` and other styles | `broadcast_format` | Switch Minecraft colors and decorations; see the template examples above |
 | `{server_name}` | `broadcast_format`, `notify_on_connect_format`, `notify_on_connect_fail_format` | Server name (always populated) |
 
 Example: `display_name` = `生存服`, format `[{display_name}] <{player}> {message}` → `[生存服] <Steve> 大家好`; with nothing filled in → `[MC] <Steve> 大家好`.

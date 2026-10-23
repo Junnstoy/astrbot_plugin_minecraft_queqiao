@@ -4,6 +4,40 @@
     "description": "启用 Minecraft 鹊桥互通",
     "default": true
   },
+  "mc_command_prefix_enabled": {
+    "type": "bool",
+    "description": "启用 mc 指令前缀",
+    "hint": "开启：mc bind、mc list 等；关闭：bind、list 等独立指令，可在 AstrBot 管理行为中将 bind 重命名为绑定。仅切换插件的 mc 前缀，全局唤醒头仍生效（如 #绑定 Steve）。保存后生效；关闭后可按需重命名与其他插件同名的指令。",
+    "default": true
+  },
+  "reply_hook_enabled": {
+    "type": "bool",
+    "description": "启用 Python 自定义回复",
+    "hint": "从 data/plugin_data/astrbot_plugin_minecraft_queqiao/reply_hook.py 加载同步函数 customize_reply(key, data, text)。返回字符串覆盖模板，返回 None 使用模板；脚本修改后下一次回复生效，异常回退模板。",
+    "default": true
+  },
+  "reply_templates": {
+    "type": "object",
+    "description": "回复模板（所有服务器共用）",
+    "hint": "绑定/解绑和远程指令的回复模板。通用占位符：{sender_name} QQ 名称、{sender_id} 账号 ID、{player} 游戏名。指令回复另有 {command}、{output}、{server_name}。留空恢复默认；未知占位符原样保留。Python 函数在模板替换后执行。",
+    "items": {
+      "bind_usage": {"type": "string", "description": "绑定指令未填写游戏名", "editor_mode": true, "default": "请填写你的游戏名，例如：#mc bind Steve"},
+      "bind_invalid": {"type": "string", "description": "游戏名格式不合法", "editor_mode": true, "default": "❌ 游戏 ID 必须为 1–16 位英文字母、数字或下划线"},
+      "bind_success": {"type": "string", "description": "绑定成功", "editor_mode": true, "default": "✅ 已绑定游戏ID：{player}"},
+      "bind_existing": {"type": "string", "description": "已绑定用户再次绑定", "hint": "{player} 为已有绑定，{requested_player} 为本次输入。", "editor_mode": true, "default": "你已绑定 {player}，请先解绑后再重新绑定。"},
+      "rebind_usage": {"type": "string", "description": "管理员修改绑定用法", "editor_mode": true, "default": "用法：修改 @玩家 新游戏ID"},
+      "rebind_missing": {"type": "string", "description": "管理员修改时目标尚未绑定", "editor_mode": true, "default": "该用户尚未绑定游戏ID：{target_id}"},
+      "rebind_success": {"type": "string", "description": "管理员修改成功", "hint": "支持 {target_id}、{old_player}、{player}（新ID）。", "editor_mode": true, "default": "已修改 {target_id} 的绑定：{old_player} → {player}"},
+      "unbind_success": {"type": "string", "description": "解绑成功", "editor_mode": true, "default": "✅ 已解除绑定"},
+      "unbind_missing": {"type": "string", "description": "解绑时没有绑定记录", "editor_mode": true, "default": "ℹ️ 你尚未绑定游戏ID"},
+      "binding_required": {"type": "string", "description": "快捷指令需要先绑定", "editor_mode": true, "default": "❌ 请先使用 mc bind <游戏ID> 绑定自己的账号"},
+      "command_success": {"type": "string", "description": "远程/自定义指令执行成功", "editor_mode": true, "default": "✅ 已执行：{command}\n{output}"},
+      "command_disabled": {"type": "string", "description": "远程执行开关已关闭", "editor_mode": true, "default": "❌ 该服务器的远程指令功能已关闭"},
+      "command_denied": {"type": "string", "description": "指令被黑白名单阻止", "editor_mode": true, "default": "🚫 指令 `{command}` 不在允许名单内"},
+      "command_failed": {"type": "string", "description": "指令执行失败", "editor_mode": true, "default": "❌ 指令执行失败：{command}\n请确认鹊桥已开启 RCON 或已配置直连 RCON"},
+      "server_missing": {"type": "string", "description": "指令目标服务器不存在", "editor_mode": true, "default": "❌ 未找到服务器 {server_name}"}
+    }
+  },
   "mc_servers": {
     "type": "template_list",
     "description": "MC服务器列表",
@@ -107,7 +141,7 @@
             "default": "ai"
           },
           "terminal_days": {
-            "type": "integer",
+            "type": "int",
             "description": "互通终端加载最近几天的日志分片",
             "hint": "互通终端展示最近几天的日志（0~30，0=全部保留分片，默认 2：今天+昨天）。每台服务器独立",
             "default": 2
@@ -137,7 +171,7 @@
             "default": "[{display_name}] 🔴 服务器连接失败"
           },
           "connect_fail_notify_delay": {
-            "type": "integer",
+            "type": "int",
             "description": "断连静默期（秒）",
             "hint": "断线超过该秒数仍未恢复才发「连接失败」通知，期间连回则完全不通知。0 到 3600，0 = 断线立即通知，默认 60",
             "default": 60
@@ -249,7 +283,7 @@
               "broadcast_format": {
                 "type": "string",
                 "description": "外部消息转发到MC的格式",
-                "hint": "发送到游戏内的格式。{platform} 平台名，{sender} 发送者名，{message} 消息内容，{display_name} 服务器显示名称（可中文；未填则用显示名称默认值，默认 MC），{server_name} 服务器名称（始终有值）",
+                "hint": "占位符：{platform} 平台，{sender}/{player} 发送者（优先绑定名），{sender_name} 纯发送者名，{reply} 回复标记(回复 @玩家)，颜色/字体跟随模板，{reply_player} 回复目标，{message} 正文，{display_name}/{server_name} 服务器名。无回复时 {reply} 为空；未写 {reply} 时 {sender}/{player} 自动附回复标记。颜色支持 &0~&f 或 §0~§f、&#RRGGBB；&l 粗体、&o 斜体、&n 下划线、&m 删除线、&k 随机字符、&r 重置。也可写 {gray} {gold} {white} 等 MC 英文颜色名及 {bold} {italic} {reset}。示例：&7[{platform}] &e{player}&7{reply}&f：{message}。颜色仅解析模板，不解析 QQ 正文。",
                 "default": "[{platform}]{sender}: {message}"
               },
               "platform_names": {
@@ -286,7 +320,7 @@
               "forward_image_to_mc": {
                 "type": "bool",
                 "description": "转发图片到游戏内",
-                "hint": "外部会话消息中的图片自动转发到 MC 游戏内。需要游戏端安装 ChatImage 模组（https://github.com/kitUIN/ChatImage）才会渲染成图片，否则显示为 [[CICode,...]] 文本。图片以广播消息携带 URL 的形式发送，玩家客户端自行加载，需保证图片 URL 对玩家客户端可达",
+                "hint": "外部图片转发到 MC。图片转发形式选择 link 时显示可点击链接，原版客户端即可使用；选择 chatimage 时需要 ChatImage 模组渲染，否则显示 [[CICode,...]] 文本。图片 URL 需对玩家可达。",
                 "default": false
               },
               "chatimage_name": {
@@ -300,6 +334,13 @@
                 "description": "转发游戏内图片到外部会话",
                 "hint": "游戏内聊天消息中的图片（ChatImage 的 [[CICode,url=...]] 代码或直接贴出的图片链接）自动下载后作为图片发送到外部会话。默认关闭。下载失败（如 file:// 本地文件不在本机、链接失效）时保留原始文本（代码/链接），不静默丢失",
                 "default": false
+              },
+              "image_forward_mode": {
+                "type": "string",
+                "description": "图片转发形式",
+                "hint": "link：原版客户端可点击的图片链接；chatimage：ChatImage 模组代码。需要同时开启转发图片到游戏内。",
+                "options": ["chatimage", "link"],
+                "default": "chatimage"
               }
             }
           },

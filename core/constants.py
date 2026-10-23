@@ -6,6 +6,24 @@
 PLUGIN_NAME = "astrbot_plugin_minecraft_queqiao"
 PLUGIN_DATA_DIR = "astrbot_plugin_minecraft_queqiao"
 
+DEFAULT_REPLY_TEMPLATES = {
+    "bind_usage": "请填写你的游戏名，例如：#mc bind Steve",
+    "bind_invalid": "❌ 游戏 ID 必须为 1–16 位英文字母、数字或下划线",
+    "bind_success": "✅ 已绑定游戏ID：{player}",
+    "bind_existing": "你已绑定 {player}，请先解绑后再重新绑定。",
+    "rebind_usage": "用法：修改 @玩家 新游戏ID",
+    "rebind_missing": "该用户尚未绑定游戏ID：{target_id}",
+    "rebind_success": "已修改 {target_id} 的绑定：{old_player} → {player}",
+    "unbind_success": "✅ 已解除绑定",
+    "unbind_missing": "ℹ️ 你尚未绑定游戏ID",
+    "binding_required": "❌ 请先使用 mc bind <游戏ID> 绑定自己的账号",
+    "command_success": "✅ 已执行：{command}\n{output}",
+    "command_disabled": "❌ 该服务器的远程指令功能已关闭",
+    "command_denied": "🚫 指令 `{command}` 不在允许名单内",
+    "command_failed": "❌ 指令执行失败：{command}\n请确认鹊桥已开启 RCON 或已配置直连 RCON",
+    "server_missing": "❌ 未找到服务器 {server_name}",
+}
+
 # ---- 鹊桥 API 名称（V2，鹊桥 >= v0.2.11） ----
 
 API_BROADCAST = "broadcast"

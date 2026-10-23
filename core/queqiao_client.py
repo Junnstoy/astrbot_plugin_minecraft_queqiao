@@ -715,8 +715,12 @@ class QueQiaoClient:
         component: dict[str, Any] = {"text": text}
         if color:
             component["color"] = color
+        return await self.broadcast_components([component])
+
+    async def broadcast_components(self, components: list[dict]) -> bool:
+        """广播原版文本组件，保留链接点击与引用悬停事件，超时不重发。"""
         try:
-            result = await self.call_api(API_BROADCAST, {"message": [component]})
+            result = await self.call_api(API_BROADCAST, {"message": components})
         except QueQiaoTimeout:
             return True
         return self._is_success(result)

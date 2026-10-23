@@ -1197,9 +1197,13 @@ class _Ctx26:
     async def send_message(self, *a, **k): return True
 
 class _Cli26:
-    def __init__(self): self.sent = []
+    def __init__(self): self.sent = []; self.rich = []
     async def broadcast(self, text, color="white"):
         self.sent.append((text, color)); return True
+    async def broadcast_components(self, components):
+        self.rich.append(components)
+        self.sent.append(("".join(part.get("text", "") for part in components), components[0].get("color", "white")))
+        return True
 
 class _Inst26:
     def __init__(self): self.client = _Cli26(); self.connected = True
@@ -1218,6 +1222,7 @@ class _Ev26:
     def get_sender_name(self): return self._sender
     def get_sender_id(self): return ""
     def get_platform_name(self): return self._platform
+    def get_platform_id(self): return "umo"
     def stop_event(self): self.stopped = True
     def plain_result(self, text): return text
 
@@ -2823,6 +2828,8 @@ assert _cpm34(
 ) is _smem34c
 # 读不到 meminfo（非 Windows）：无法判定部署形态 → 清零隐藏
 _orig_read34 = _hm34.read_host_meminfo
+_orig_os34 = _hm34.os
+_hm34.os = types.SimpleNamespace(name="posix")
 _hm34.read_host_meminfo = lambda: None  # type: ignore[method-assign]
 try:
     _smem34d = _SS34(
@@ -2832,8 +2839,12 @@ try:
     _cmem34d = _cpm34(_smem34d)
     assert _cmem34d["memory_total"] == 0, _cmem34d
     assert _cmem34d["memory_usage_text"] == "未知", _cmem34d
+    _hm34.os = types.SimpleNamespace(name="nt")
+    _win34 = _SS34(memory_total=8 * 1024 ** 3, memory_used=7 * 1024 ** 3).to_dict()
+    assert _cpm34(_win34)["memory_total"] == 8 * 1024 ** 3
 finally:
     _hm34.read_host_meminfo = _orig_read34
+    _hm34.os = _orig_os34
 
 # (b) MetricsCollector 计数与发布订阅
 _mc34 = _MC34(max_history=10)
@@ -5032,14 +5043,13 @@ assert "queqiao:config-view-return" in _js44, (
 assert 'id="btn-close-config-view"' not in _html44, "内嵌面板无需「返回监控」按钮，由标签切换离开"
 assert ".config-view" in _css44, "缺少配置视图内嵌面板样式"
 assert (_web44.parent / "config").exists() is False, "独立 config 页面目录应已移除"
-# 配置 schema 守卫：terminal_days 用 JSON Schema 标准类型 integer 定义
-# （_conf_schema.json），服务器模板渲染时必须与 int 同等对待
+# 配置 schema 守卫：宿主使用自定义类型 int；integer 会导致空值保存报错。
 _cfgschema44 = json.loads(
     (_pl44.Path(__file__).resolve().parent / "_conf_schema.json").read_text(encoding="utf-8")
 )
 assert _cfgschema44["mc_servers"]["templates"]["server"]["items"][
     "terminal_days"
-]["type"] == "integer", "terminal_days 在 schema 中应是 integer（前端已兼容）"
+]["type"] == "int", "terminal_days 必须使用 AstrBot 面板校验支持的 int 类型"
 print("OK  AI 字段条目顶层读写(不污染 server 子对象) / 前缀置空与字符串布尔 / "
       "消息转发 message 子对象读写·漏传合并·运行时就地生效 / 目标会话软更新 / "
       "自动刷新间隔与折叠状态钳制·合并·落盘 / 监控弹窗控件迁移与前端静态守卫")
@@ -5995,8 +6005,8 @@ _pi50, _inst50 = _mk50({"server": {"server_name": "S50"},
 _ev50a = _Ev50(text="收到，马上来",
                reply=_Reply50(id=1, message_str="[MC]Player_A: 1"))
 assert _run49(_pi50.on_message(_ev50a)) == []
-assert _inst50.client.sent == [("[QQ]群友A: @Player_A 收到，马上来", "white")], \
-    _inst50.client.sent
+assert _inst50.client.sent[0][0] == "[QQ]群友A(回复 @Player_A)： 收到，马上来"
+assert "[MC]Player_A: 1" in _inst50.client.rich[0][-1]["hoverEvent"]["contents"]["extra"][1]["text"]
 assert _ev50a.stopped is True, "转发成功后应 stop 后续处理"
 
 # (b) 普通消息（无 Reply 组件）→ 不加 @
@@ -6013,8 +6023,8 @@ _pi50c, _inst50c = _mk50({"server": {"server_name": "S50"},
 _ev50c = _Ev50(text="收到",
                reply=_Reply50(id=1, message_str="[QQ]XiaoMing: 你好"))
 assert _run49(_pi50c.on_message(_ev50c)) == []
-assert _inst50c.client.sent == [("[QQ]群友A: 收到", "white")], \
-    _inst50c.client.sent
+assert _inst50c.client.sent[0][0] == "[QQ]群友A(回复 @原消息)： 收到"
+assert "[QQ]XiaoMing: 你好" in _inst50c.client.rich[0][0]["hoverEvent"]["contents"]["extra"][1]["text"]
 
 # (d) 自定义 forward_chat_format 结构同样能反解
 _pi50d, _inst50d = _mk50({"server": {"server_name": "S50d"},
@@ -6022,32 +6032,29 @@ _pi50d, _inst50d = _mk50({"server": {"server_name": "S50d"},
                 "forward_chat_format": "[{display_name}]<{player}> {message}"}})
 _ev50d = _Ev50(text="1", reply=_Reply50(id=1, message_str="[MC]<Player_B> 1"))
 assert _run49(_pi50d.on_message(_ev50d)) == []
-assert _inst50d.client.sent == [("[QQ]群友A: @Player_B 1", "white")], \
-    _inst50d.client.sent
+assert _inst50d.client.sent[0][0] == "[QQ]群友A(回复 @Player_B)： 1"
 
 # (e) 玩家名非法（过短）→ 不加 @
 _pi50e, _inst50e = _mk50({"server": {"server_name": "S50"},
     "message": {"target_sessions": ["umo:GroupMessage:9"]}})
 _ev50e = _Ev50(text="收到", reply=_Reply50(id=1, message_str="[MC]P: 1"))
 assert _run49(_pi50e.on_message(_ev50e)) == []
-assert _inst50e.client.sent == [("[QQ]群友A: 收到", "white")], \
-    _inst50e.client.sent
+assert _inst50e.client.sent[0][0] == "[QQ]群友A(回复 @原消息)： 收到"
 
 # (f) 被引用文本为空 → 不加 @
 _pi50f, _inst50f = _mk50({"server": {"server_name": "S50"},
     "message": {"target_sessions": ["umo:GroupMessage:9"]}})
 _ev50f = _Ev50(text="收到", reply=_Reply50(id=1, message_str=""))
 assert _run49(_pi50f.on_message(_ev50f)) == []
-assert _inst50f.client.sent == [("[QQ]群友A: 收到", "white")], \
-    _inst50f.client.sent
+assert _inst50f.client.sent[0][0] == "[QQ]群友A(回复 @原消息)： 收到"
+assert "原文未取得" in _inst50f.client.rich[0][0]["hoverEvent"]["contents"]["extra"][1]["text"]
 
 # (g) 自定义服务器显示名（display_name）匹配 → 解析成功
 _pi50g, _inst50g = _mk50({"server": {"server_name": "S50g", "display_name": "生存服"},
     "message": {"target_sessions": ["umo:GroupMessage:9"]}})
 _ev50g = _Ev50(text="在吗", reply=_Reply50(id=1, message_str="[生存服]Player_C: 1"))
 assert _run49(_pi50g.on_message(_ev50g)) == []
-assert _inst50g.client.sent == [("[QQ]群友A: @Player_C 在吗", "white")], \
-    _inst50g.client.sent
+assert _inst50g.client.sent[0][0] == "[QQ]群友A(回复 @Player_C)： 在吗"
 
 # (h) 格式不含 display_name 段 → 无显示名校验，直接反解玩家名
 _pi50h, _inst50h = _mk50({"server": {"server_name": "S50h"},
@@ -6055,8 +6062,7 @@ _pi50h, _inst50h = _mk50({"server": {"server_name": "S50h"},
                 "forward_chat_format": "{player}: {message}"}})
 _ev50h = _Ev50(text="1", reply=_Reply50(id=1, message_str="Player_D: 1"))
 assert _run49(_pi50h.on_message(_ev50h)) == []
-assert _inst50h.client.sent == [("[QQ]群友A: @Player_D 1", "white")], \
-    _inst50h.client.sent
+assert _inst50h.client.sent[0][0] == "[QQ]群友A(回复 @Player_D)： 1"
 print("OK  回复游戏消息反解玩家名 / 非游戏消息不加 @ / 自定义格式与显示名 / 非法玩家名 全通过")
 
 print("\n=== 51. 服务器连通通知（默认关闭 / 文案模板 / 连接回调发送） ===")
@@ -6604,7 +6610,7 @@ assert "notify_on_connect" not in _items51["message"]["items"], \
 assert "notify_on_connect_fail" not in _items51["message"]["items"], \
     "连接失败通知应落在模板项顶层，message 子对象内不得重复"
 # 断连静默期：整数秒，默认 60，与代码默认一致，hint 说明 0=立即通知
-assert _items51["connect_fail_notify_delay"]["type"] == "integer"
+assert _items51["connect_fail_notify_delay"]["type"] == "int"
 assert _items51["connect_fail_notify_delay"]["default"] == _DCFND51
 assert "秒" in _items51["connect_fail_notify_delay"]["hint"]
 assert "0" in _items51["connect_fail_notify_delay"]["hint"]

@@ -422,7 +422,9 @@ class QueQiaoEvent:
             timestamp=_as_int(data.get("timestamp")),
             player=QueQiaoPlayer.from_dict(data.get("player")),
             message=_as_str(data.get("message")),
-            raw_message=_as_str(data.get("raw_message")),
+            raw_message=(json.dumps(data["raw_message"], ensure_ascii=False)
+                         if isinstance(data.get("raw_message"), (dict, list))
+                         else _as_str(data.get("raw_message"))),
             command=_as_str(data.get("command")),
             death=QueQiaoTranslate.from_dict(data.get("death")),
             achievement=QueQiaoAchievement.from_dict(data.get("achievement")),

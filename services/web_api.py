@@ -759,7 +759,9 @@ class WebApiController:
         if not (umo and game_id):
             return error_response("umo 与 game_id 均不能为空", status_code=400)
 
-        self.binding_service.bind(umo, game_id)
+        if not self.binding_service.valid_game_id(game_id):
+            return error_response("游戏 ID 必须为 1–16 位英文字母、数字或下划线", status_code=400)
+        await self.binding_service.bind(umo, game_id)
         return json_response({"success": True, "umo": umo, "game_id": game_id})
 
     async def delete_binding(self) -> Any:
@@ -769,7 +771,7 @@ class WebApiController:
         if not umo:
             return error_response("umo 不能为空", status_code=400)
 
-        removed = self.binding_service.unbind(umo)
+        removed = await self.binding_service.unbind(umo)
         return json_response({"success": removed, "umo": umo})
 
     async def get_image_bed_status(self) -> Any:

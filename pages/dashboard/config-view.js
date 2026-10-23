@@ -158,9 +158,10 @@ function createControl(spec, onchange) {
           get: () => el.value,
         };
       }
-      const el = document.createElement('input');
-      el.type = 'text';
-      el.className = 'cfg-input';
+      const el = document.createElement(spec.editor_mode ? 'textarea' : 'input');
+      if (spec.editor_mode) el.rows = 3;
+      else el.type = 'text';
+      el.className = spec.editor_mode ? 'cfg-textarea' : 'cfg-input';
       el.addEventListener('input', () => onchange());
       return {
         el,
@@ -250,6 +251,38 @@ function buildFieldRow(key, spec, target, onchange, opts = {}) {
     target[key] = control.get();
   });
   ctrl.appendChild(control.el);
+  if (key === 'broadcast_format') {
+    const insert = document.createElement('select');
+    insert.className = 'cfg-select';
+    insert.setAttribute('aria-label', '插入转发占位符或 MC 样式');
+    const choices = [
+      ['', '插入占位符 / 颜色 / 样式…'],
+      ['{platform}', '平台名'], ['{player}', '发送者（优先绑定名）'],
+      ['{sender_name}', '发送者（不自动附回复）'], ['{reply}', '回复标记（跟随模板颜色/字体，无回复时留空）'],
+      ['{reply_player}', '回复目标'], ['{message}', '消息正文'],
+      ['{display_name}', '服务器显示名'], ['{server_name}', '服务器名称'],
+      ...['black', 'dark_blue', 'dark_green', 'dark_aqua', 'dark_red', 'dark_purple',
+        'gold', 'gray', 'dark_gray', 'blue', 'green', 'aqua', 'red', 'light_purple',
+        'yellow', 'white'].map((name) => [`{${name}}`, `颜色：${name}`]),
+      ['{bold}', '粗体'], ['{italic}', '斜体'], ['{underlined}', '下划线'],
+      ['{strikethrough}', '删除线'], ['{reset}', '恢复默认颜色与字体'],
+    ];
+    for (const [value, label] of choices) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      insert.appendChild(option);
+    }
+    insert.addEventListener('change', () => {
+      if (!insert.value) return;
+      control.el.setRangeText(insert.value, control.el.selectionStart ?? control.el.value.length,
+        control.el.selectionEnd ?? control.el.value.length, 'end');
+      control.el.dispatchEvent(new Event('input', { bubbles: true }));
+      control.el.focus();
+      insert.value = '';
+    });
+    ctrl.appendChild(insert);
+  }
   row.appendChild(ctrl);
   const hint = document.createElement('span');
   hint.className = 'settings-row-hint';
@@ -467,6 +500,13 @@ function buildViewForm() {
       card.appendChild(body);
       sec.appendChild(card);
       form.appendChild(sec);
+    }
+    const replyKeys = ['mc_command_prefix_enabled', 'reply_hook_enabled', 'reply_templates'].filter((key) => schema[key]);
+    if (replyKeys.length) {
+      const replies = sectionTitle('回复模板（所有服务器共用）');
+      buildObjectFields(replies, Object.fromEntries(replyKeys.map((key) => [key, schema[key]])),
+        conf, () => setDirty(true));
+      form.appendChild(replies);
     }
     return;
   }
